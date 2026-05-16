@@ -4,7 +4,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ChevronDown } from "lucide-react";
@@ -78,9 +77,25 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
         });
     };
 
-    const filteredCategories = categories.filter(
-        (c) => form.type === "transfer" || c.type === form.type
-    );
+    const filteredCategories = categories
+        .filter((c) => form.type === "transfer" || c.type === form.type)
+        .sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999));
+
+    // Build hierarchical order: parents first, then their children indented
+    const catParents = filteredCategories.filter((c) => !c.parent_category);
+    const catChildren = filteredCategories.filter((c) => !!c.parent_category);
+    const orderedCats = [];
+    catParents.forEach((p) => {
+        orderedCats.push({ ...p, isParent: true });
+        catChildren
+            .filter((c) => c.parent_category === p.id)
+            .forEach((c) => orderedCats.push({ ...c, isParent: false }));
+    });
+    catChildren
+        .filter((c) => !catParents.find((p) => p.id === c.parent_category))
+        .forEach((c) => orderedCats.push({ ...c, isParent: false }));
+
+    const sortedAccounts = [...accounts].sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999));
 
     const isFreelance = form.project_name || form.client_name;
 
@@ -105,7 +120,13 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
 
                     {/* Status */}
                     <div>
-                        <Tabs value={form.status === "projected" ? "confirmed" : form.status} onValueChange={(v) => set("status", v)}>
+                        <Tabs value={form.status === "projected" ? "confirmed" : form.status}
+                            onValueChange={(v) => setForm((p) => ({
+                                ...p,
+                                status: v,
+                                is_recurring: v === "installment",
+                                recurring_frequency: v === "installment" ? p.recurring_frequency : "",
+                            }))}>
                             <TabsList className="w-full">
                                 <TabsTrigger value="confirmed" className="flex-1 text-xs">Confirmado</TabsTrigger>
                                 <TabsTrigger value="installment" className="flex-1 text-xs">Cuota/Recurrente</TabsTrigger>
@@ -119,7 +140,7 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
                         <Select value={form.account_id} onValueChange={(v) => handleAccountChange(v, "account")}>
                             <SelectTrigger><SelectValue placeholder="Seleccionar cuenta" /></SelectTrigger>
                             <SelectContent>
-                                {accounts.map((a) => (
+                                {sortedAccounts.map((a) => (
                                     <SelectItem key={a.id} value={a.id}>{a.name} ({a.currency || "MXN"})</SelectItem>
                                 ))}
                             </SelectContent>
@@ -155,7 +176,7 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
                             <Select value={form.to_account_id} onValueChange={(v) => handleAccountChange(v, "to")}>
                                 <SelectTrigger><SelectValue placeholder="Seleccionar cuenta destino" /></SelectTrigger>
                                 <SelectContent>
-                                    {accounts.filter((a) => a.id !== form.account_id).map((a) => (
+                                    {sortedAccounts.filter((a) => a.id !== form.account_id).map((a) => (
                                         <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
                                     ))}
                                 </SelectContent>
@@ -169,44 +190,44 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
                             <Select value={form.category_id} onValueChange={handleCategoryChange}>
                                 <SelectTrigger><SelectValue placeholder="Seleccionar categoría" /></SelectTrigger>
                                 <SelectContent>
-                                    {filteredCategories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                                    {orderedCats.map((c) => (
+                                        <SelectItem key={c.id} value={c.id}>
+                                            {c.isParent ? c.name : `  ↳ ${c.name}`}
+                                        </SelectItem>
+                                    ))}
                                 </SelectContent>
                             </Select>
                         </div>
                     )}
 
-                    {/* Installment fields — only when installment status */}
+                    {/* Campos de cuota/recurrente — solo cuando status === installment */}
                     {form.status === "installment" && (
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="space-y-3 rounded-lg border border-border/60 bg-muted/20 p-3">
                             <div>
-                                <Label className="text-xs">Cuota nº actual</Label>
-                                <Input type="number" value={form.installment_current || ""}
-                                    onChange={(e) => set("installment_current", e.target.value)} placeholder="1" />
+                                <Label className="text-xs mb-1.5 block">Frecuencia</Label>
+                                <Select value={form.recurring_frequency} onValueChange={(v) => set("recurring_frequency", v)}>
+                                    <SelectTrigger><SelectValue placeholder="Seleccionar frecuencia" /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="weekly">Semanal</SelectItem>
+                                        <SelectItem value="biweekly">Quincenal</SelectItem>
+                                        <SelectItem value="monthly">Mensual</SelectItem>
+                                        <SelectItem value="yearly">Anual</SelectItem>
+                                    </SelectContent>
+                                </Select>
                             </div>
-                            <div>
-                                <Label className="text-xs">Total de cuotas</Label>
-                                <Input type="number" value={form.installment_total || ""}
-                                    onChange={(e) => set("installment_total", e.target.value)} placeholder="12" />
+                            <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                    <Label className="text-xs">Cuota nº actual</Label>
+                                    <Input type="number" value={form.installment_current || ""}
+                                        onChange={(e) => set("installment_current", e.target.value)} placeholder="1" />
+                                </div>
+                                <div>
+                                    <Label className="text-xs">Total de cuotas</Label>
+                                    <Input type="number" value={form.installment_total || ""}
+                                        onChange={(e) => set("installment_total", e.target.value)} placeholder="12" />
+                                </div>
                             </div>
                         </div>
-                    )}
-
-                    {/* Recurrente toggle */}
-                    <div className="flex items-center gap-3">
-                        <Switch checked={form.is_recurring} onCheckedChange={(v) => set("is_recurring", v)} id="recurring" />
-                        <Label htmlFor="recurring" className="cursor-pointer">Recurrente</Label>
-                    </div>
-
-                    {form.is_recurring && (
-                        <Select value={form.recurring_frequency} onValueChange={(v) => set("recurring_frequency", v)}>
-                            <SelectTrigger><SelectValue placeholder="Frecuencia" /></SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="weekly">Semanal</SelectItem>
-                                <SelectItem value="biweekly">Quincenal</SelectItem>
-                                <SelectItem value="monthly">Mensual</SelectItem>
-                                <SelectItem value="yearly">Anual</SelectItem>
-                            </SelectContent>
-                        </Select>
                     )}
 
                     {/* Extra fields collapsed */}

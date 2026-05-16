@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, ChevronLeft, ChevronRight, ChevronDown, TrendingUp, TrendingDown, Target, CloudLightning, Trash2 } from "lucide-react";
+import { Plus, ChevronLeft, ChevronRight, ChevronDown, TrendingUp, TrendingDown, Target, CloudLightning, Trash2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -9,7 +9,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import PageHeader from "@/components/shared/PageHeader";
 import CurrencySelector from "@/components/shared/CurrencySelector";
 import TransactionFormProjected from "@/components/transactions/TransactionFormProjected";
-import { formatCurrency, formatCurrencyCode, formatDate, getCurrentMonth, getMonthLabel } from "@/lib/formatters";
+import { formatCurrencyCode, formatDate, getCurrentMonth, getMonthLabel } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { useCurrency } from "@/lib/currency-context";
 import { toast } from "sonner";
@@ -54,6 +54,7 @@ export default function Projected() {
     });
     const { data: accounts = [] } = useQuery({ queryKey: ["accounts"], queryFn: () => base44.entities.Account.list() });
     const { data: categories = [] } = useQuery({ queryKey: ["categories"], queryFn: () => base44.entities.Category.list() });
+    const { data: investments = [] } = useQuery({ queryKey: ["investments"], queryFn: () => base44.entities.Investment.list() });
 
     const createMut = useMutation({
         mutationFn: (data) => base44.entities.Transaction.create({ ...data, status: "projected" }),
@@ -68,6 +69,22 @@ export default function Projected() {
         onSuccess: () => queryClient.invalidateQueries({ queryKey: ["transactions"] }),
     });
 
+    const prevMonthKey = addMonths(selectedMonth, -1);
+    const prevMonthProjected = useMemo(
+        () => transactions.filter((t) => t.status === "projected" && txMonth(t) === prevMonthKey),
+        [transactions, selectedMonth]
+    );
+
+    const copyFromPrevMonth = async () => {
+        if (prevMonthProjected.length === 0) { toast.error("No hay proyecciones del mes anterior"); return; }
+        for (const tx of prevMonthProjected) {
+            const day = tx.date?.slice(8, 10) || "01";
+            await base44.entities.Transaction.create({ ...tx, id: undefined, date: `${selectedMonth}-${day}`, status: "projected" });
+        }
+        queryClient.invalidateQueries({ queryKey: ["transactions"] });
+        toast.success(`${prevMonthProjected.length} proyecciones copiadas`);
+    };
+
     const currentMonth = getCurrentMonth();
     const isFuture = selectedMonth > currentMonth;
     const isPast = selectedMonth < currentMonth;
@@ -76,7 +93,7 @@ export default function Projected() {
     const [pastExpanded, setPastExpanded] = useState({});
     const togglePast = (key) => setPastExpanded((p) => ({ ...p, [key]: !p[key] }));
 
-    // Balance líquido actual (cuentas no-inversión, calculado desde transacciones)
+    // Balance total actual (cuentas líquidas + inversiones activas)
     const todayDate = new Date().toISOString().split("T")[0];
     const currentLiquidBalance = useMemo(() => {
         const liquidAccts = accounts.filter((a) => a.type !== "investment");
@@ -96,17 +113,27 @@ export default function Projected() {
         }, 0);
     }, [accounts, transactions, convert]);
 
-    // Balance acumulado al final de un mes dado
-    // Pasado: usa ahorro real; futuro: usa ahorro proyectado
+    const investedTotal = useMemo(() =>
+        investments
+            .filter((i) => !i.status || i.status === "activa")
+            .reduce((s, i) => s + convert(i.current_value || i.amount_invested || 0, i.currency || "MXN"), 0),
+        [investments, convert]);
+
+    const currentTotalSavings = currentLiquidBalance + investedTotal;
+
+    // Balance acumulado al final de un mes dado (base = total: líquido + invertido)
     function getBalanceAtMonth(targetMonth) {
-        if (targetMonth === currentMonth) return currentLiquidBalance;
+        const cm = computeMonth(currentMonth);
+        const endOfCurrentMonth = currentTotalSavings + (cm.projSavings - cm.realSavings);
+
+        if (targetMonth === currentMonth) return endOfCurrentMonth;
         if (targetMonth > currentMonth) {
-            let bal = currentLiquidBalance;
+            let bal = endOfCurrentMonth;
             let m = addMonths(currentMonth, 1);
             while (m <= targetMonth) { bal += computeMonth(m).projSavings; m = addMonths(m, 1); }
             return bal;
         } else {
-            let bal = currentLiquidBalance;
+            let bal = currentTotalSavings;
             let m = currentMonth;
             while (m > targetMonth) { bal -= computeMonth(m).realSavings; m = addMonths(m, -1); }
             return bal;
@@ -178,11 +205,24 @@ export default function Projected() {
             const projExp = projTxs.filter((t) => t.type === "expense").reduce((s, t) => s + convert(t.amount || 0, t.currency || "MXN"), 0);
             const realInc = realTxs.filter((t) => t.type === "income").reduce((s, t) => s + convert(t.amount || 0, t.currency || "MXN"), 0);
             const realExp = realTxs.filter((t) => t.type === "expense").reduce((s, t) => s + convert(t.amount || 0, t.currency || "MXN"), 0);
+            const isCurrent = year === thisYear;
+            // For current year: blend real (past months) + projected (current month onwards)
+            const blendedSavings = isCurrent
+                ? txsOfYear.filter((t) => {
+                    const mo = t.date?.slice(0, 7);
+                    if (!mo) return false;
+                    return mo < currentMonth ? t.status !== "projected" : t.status === "projected";
+                }).reduce((s, t) => {
+                    const amt = convert(t.amount || 0, t.currency || "MXN");
+                    return s + (t.type === "income" ? amt : t.type === "expense" ? -amt : 0);
+                }, 0)
+                : realInc - realExp;
             return {
                 year,
                 projIncome: projInc, projExpense: projExp, projSavings: projInc - projExp,
                 realIncome: realInc, realExpense: realExp, realSavings: realInc - realExp,
-                isCurrent: year === thisYear,
+                blendedSavings,
+                isCurrent,
             };
         });
     }, [transactions, convert]);
@@ -226,6 +266,11 @@ export default function Projected() {
                 action={
                     <div className="flex items-center gap-2">
                         <CurrencySelector />
+                        {view === "monthly" && projected.length > 0 && prevMonthProjected.length > 0 && (
+                            <Button variant="outline" size="sm" onClick={copyFromPrevMonth}>
+                                <RefreshCw className="h-4 w-4 mr-1.5" />Copiar mes anterior
+                            </Button>
+                        )}
                         <Button size="sm" onClick={() => setShowForm(true)}>
                             <Plus className="h-4 w-4 mr-1.5" />Nueva proyección
                         </Button>
@@ -247,12 +292,13 @@ export default function Projected() {
                     : view === "yearly" ? `${selectedYear}-12`
                         : currentMonth;
                 const balance = getBalanceAtMonth(refMonth);
-                const delta = balance - currentLiquidBalance;
+                const delta = balance - currentTotalSavings;
                 const isRefPast = refMonth < currentMonth;
                 const isRefFuture = refMonth > currentMonth;
                 const label = isRefPast ? `al fin de ${getMonthLabel(refMonth)}`
                     : isRefFuture ? `estimado al fin de ${getMonthLabel(refMonth)}`
-                        : "actual";
+                        : delta !== 0 ? `estimado al fin de ${getMonthLabel(refMonth)}`
+                            : "actual";
                 return (
                     <Card className={cn("border-2", balance >= 0 ? "border-primary/20 bg-primary/5" : "border-destructive/20 bg-destructive/5")}>
                         <CardContent className="p-4 flex items-center justify-between gap-4">
@@ -348,54 +394,42 @@ export default function Projected() {
                             ))}
                         </div>
                     ) : (
-                        /* ── Mes actual: proyectado vs real lado a lado ── */
-                        <div className="space-y-3">
-                            <div className="grid grid-cols-3 gap-1 text-xs text-muted-foreground px-1">
-                                <span></span>
-                                <span className="text-center font-medium">Proyectado</span>
-                                <span className="text-center font-medium">Real</span>
-                            </div>
+                        /* ── Mes actual: proyectado es primario, real es "ya acumulado" ── */
+                        <div className="grid grid-cols-3 gap-3">
                             <Card><CardContent className="p-4">
-                                <div className="grid grid-cols-3 gap-2 items-start">
-                                    <div className="flex items-center gap-1.5 pt-0.5">
-                                        <TrendingUp className="h-4 w-4 text-primary shrink-0" />
-                                        <span className="text-sm font-medium">Ingresos</span>
+                                <p className="text-xs text-muted-foreground mb-1.5">Ingresos esperados</p>
+                                <CurrencyLines byC={projIncomeByC} total={projIncome} colorClass="text-primary" />
+                                {realIncome > 0 && (
+                                    <div className="mt-2 pt-2 border-t border-border/40 space-y-0.5">
+                                        <p className="text-[10px] text-muted-foreground">Ya ingresado</p>
+                                        <CurrencyLines byC={realIncomeByC} total={realIncome} colorClass="text-muted-foreground" />
                                     </div>
-                                    <div className="text-center"><CurrencyLines byC={projIncomeByC} total={projIncome} colorClass="text-muted-foreground" /></div>
-                                    <div className="text-center">
-                                        <CurrencyLines byC={realIncomeByC} total={realIncome} colorClass="text-primary" />
-                                        {diffIncome !== 0 && <p className={cn("text-xs mt-0.5", diffIncome >= 0 ? "text-primary" : "text-destructive")}>{diffIncome >= 0 ? "+" : ""}{formatCurrencyCode(diffIncome, displayCurrency)}</p>}
-                                    </div>
-                                </div>
+                                )}
                             </CardContent></Card>
                             <Card><CardContent className="p-4">
-                                <div className="grid grid-cols-3 gap-2 items-start">
-                                    <div className="flex items-center gap-1.5 pt-0.5">
-                                        <TrendingDown className="h-4 w-4 text-destructive shrink-0" />
-                                        <span className="text-sm font-medium">Gastos</span>
+                                <p className="text-xs text-muted-foreground mb-1.5">Gastos esperados</p>
+                                <CurrencyLines byC={projExpenseByC} total={projExpense} colorClass="text-destructive" />
+                                {realExpense > 0 && (
+                                    <div className="mt-2 pt-2 border-t border-border/40 space-y-0.5">
+                                        <p className="text-[10px] text-muted-foreground">Ya gastado</p>
+                                        <CurrencyLines byC={realExpenseByC} total={realExpense} colorClass="text-muted-foreground" />
                                     </div>
-                                    <div className="text-center"><CurrencyLines byC={projExpenseByC} total={projExpense} colorClass="text-muted-foreground" /></div>
-                                    <div className="text-center">
-                                        <CurrencyLines byC={realExpenseByC} total={realExpense} colorClass="text-destructive" />
-                                        {diffExpense !== 0 && <p className={cn("text-xs mt-0.5", diffExpense <= 0 ? "text-primary" : "text-destructive")}>{diffExpense >= 0 ? "+" : ""}{formatCurrencyCode(diffExpense, displayCurrency)}</p>}
-                                    </div>
-                                </div>
+                                )}
                             </CardContent></Card>
-                            <Card className={cn("border-2", diffSavings >= 0 ? "border-primary/30" : "border-destructive/30")}>
-                                <CardContent className="p-4">
-                                    <div className="grid grid-cols-3 gap-2 items-center">
-                                        <div className="flex items-center gap-1.5">
-                                            <Target className="h-4 w-4 text-chart-3 shrink-0" />
-                                            <span className="text-sm font-medium">Ahorro</span>
-                                        </div>
-                                        <p className="text-center text-sm font-semibold text-muted-foreground">{formatCurrencyCode(projSavings, displayCurrency)}</p>
-                                        <div className="text-center">
-                                            <p className={cn("text-sm font-bold", realSavings >= 0 ? "text-primary" : "text-destructive")}>{formatCurrencyCode(realSavings, displayCurrency)}</p>
-                                            {diffSavings !== 0 && <p className={cn("text-xs font-medium", diffSavings >= 0 ? "text-primary" : "text-destructive")}>{diffSavings >= 0 ? "+" : ""}{formatCurrencyCode(diffSavings, displayCurrency)} vs meta</p>}
-                                        </div>
+                            <Card><CardContent className="p-4">
+                                <p className="text-xs text-muted-foreground mb-1.5">Ahorro esperado</p>
+                                <p className={cn("text-sm font-semibold", projSavings >= 0 ? "text-primary" : "text-destructive")}>
+                                    {formatCurrencyCode(projSavings, displayCurrency)}
+                                </p>
+                                {realSavings !== 0 && (
+                                    <div className="mt-2 pt-2 border-t border-border/40 space-y-0.5">
+                                        <p className="text-[10px] text-muted-foreground">Hasta hoy</p>
+                                        <p className={cn("text-xs font-medium", realSavings >= 0 ? "text-muted-foreground" : "text-destructive/70")}>
+                                            {formatCurrencyCode(realSavings, displayCurrency)}
+                                        </p>
                                     </div>
-                                </CardContent>
-                            </Card>
+                                )}
+                            </CardContent></Card>
                         </div>
                     )}
 
@@ -406,7 +440,17 @@ export default function Projected() {
                         ) : projected.length === 0 ? (
                             <Card><CardContent className="py-10 text-center text-muted-foreground text-sm">
                                 <CloudLightning className="h-7 w-7 mx-auto mb-2 opacity-30" />
-                                No hay proyecciones para este mes.
+                                <p className="mb-4">No hay proyecciones para este mes.</p>
+                                {prevMonthProjected.length > 0 && (
+                                    <div className="flex flex-col sm:flex-row gap-2 justify-center items-center">
+                                        <Button variant="outline" onClick={copyFromPrevMonth}>
+                                            <RefreshCw className="h-4 w-4 mr-1.5" />Copiar del mes anterior
+                                        </Button>
+                                        <Button onClick={() => setShowForm(true)}>
+                                            <Plus className="h-4 w-4 mr-1.5" />Nueva proyección
+                                        </Button>
+                                    </div>
+                                )}
                             </CardContent></Card>
                         ) : (
                             <Card className="overflow-hidden">
@@ -422,7 +466,7 @@ export default function Projected() {
                                             </div>
                                             <div className="flex items-center gap-2 shrink-0">
                                                 <p className={cn("text-sm font-semibold", tx.type === "income" ? "text-primary" : "text-destructive")}>
-                                                    {tx.type === "income" ? "+" : "-"}{formatCurrency(tx.amount, tx.currency || "MXN")}
+                                                    {tx.type === "income" ? "+" : "-"}{formatCurrencyCode(tx.amount, tx.currency || "MXN")}
                                                 </p>
                                                 <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive"
                                                     onClick={(e) => { e.stopPropagation(); deleteMut.mutate(tx.id); }}>
@@ -462,7 +506,8 @@ export default function Projected() {
                             {yearMonths.map(({ yyyymm, monthName, realIncome, realExpense, realSavings, projSavings }) => {
                                 const isCurrentM = yyyymm === currentMonth;
                                 const isFutureM = yyyymm > currentMonth;
-                                const monthlySavings = isFutureM ? projSavings : realSavings;
+                                const isEstimated = isFutureM || isCurrentM;
+                                const monthlySavings = isEstimated ? projSavings : realSavings;
                                 const accBalance = getBalanceAtMonth(yyyymm);
                                 const isExpanded = expandedMonths.has(yyyymm);
                                 const hasData = realIncome > 0 || realExpense > 0 || projSavings !== 0;
@@ -474,17 +519,17 @@ export default function Projected() {
                                             {/* Del mes */}
                                             <span className={cn("text-right text-sm font-semibold",
                                                 !hasData ? "text-muted-foreground/30"
-                                                    : isFutureM ? "text-muted-foreground/70 italic"
+                                                    : isEstimated ? "text-muted-foreground/70 italic"
                                                         : monthlySavings >= 0 ? "text-primary" : "text-destructive")}>
                                                 {!hasData ? "—"
-                                                    : isFutureM && projSavings !== 0 ? `≈ ${formatCurrencyCode(projSavings, displayCurrency)}`
-                                                        : isFutureM ? "—"
+                                                    : isEstimated && projSavings !== 0 ? `≈ ${formatCurrencyCode(projSavings, displayCurrency)}`
+                                                        : isEstimated ? "—"
                                                             : formatCurrencyCode(realSavings, displayCurrency)}
                                             </span>
                                             {/* Ahorro total acumulado */}
                                             <span className={cn("text-right text-sm font-bold",
-                                                accBalance >= 0 ? (isFutureM ? "text-primary/70" : "text-primary") : (isFutureM ? "text-destructive/70" : "text-destructive"))}>
-                                                {isFutureM ? `≈ ${formatCurrencyCode(accBalance, displayCurrency)}` : formatCurrencyCode(accBalance, displayCurrency)}
+                                                accBalance >= 0 ? (isEstimated ? "text-primary/70" : "text-primary") : (isEstimated ? "text-destructive/70" : "text-destructive"))}>
+                                                {isEstimated ? `≈ ${formatCurrencyCode(accBalance, displayCurrency)}` : formatCurrencyCode(accBalance, displayCurrency)}
                                             </span>
                                             {hasData
                                                 ? <ChevronDown className={cn("h-3.5 w-3.5 text-muted-foreground shrink-0 transition-transform", isExpanded && "rotate-180")} />
@@ -538,11 +583,12 @@ export default function Projected() {
                             <span></span>
                         </div>
                         <div className="divide-y divide-border">
-                            {allYears.map(({ year, realIncome, realExpense, realSavings, isCurrent }) => {
+                            {allYears.map(({ year, realIncome, realExpense, realSavings, blendedSavings, isCurrent }) => {
                                 const isExpanded = expandedYears.has(year);
                                 const hasData = realIncome > 0 || realExpense > 0;
                                 const accBalance = getBalanceAtMonth(`${year}-12`);
                                 const isYearFuture = String(year) > String(new Date().getFullYear());
+                                const displaySavings = isCurrent ? blendedSavings : realSavings;
                                 return (
                                     <div key={year} className={cn(isCurrent && "bg-primary/5")}>
                                         <div className="grid grid-cols-[3rem_1fr_1fr_1.25rem] gap-2 items-center px-4 py-3 cursor-pointer hover:bg-muted/20 select-none"
@@ -553,12 +599,15 @@ export default function Projected() {
                                             </div>
                                             <span className={cn("text-right text-sm font-semibold",
                                                 !hasData ? "text-muted-foreground/30"
-                                                    : realSavings >= 0 ? "text-primary" : "text-destructive")}>
-                                                {hasData ? formatCurrencyCode(realSavings, displayCurrency) : "—"}
+                                                    : isCurrent ? "text-muted-foreground/70 italic"
+                                                        : displaySavings >= 0 ? "text-primary" : "text-destructive")}>
+                                                {hasData
+                                                    ? isCurrent ? `≈ ${formatCurrencyCode(displaySavings, displayCurrency)}` : formatCurrencyCode(displaySavings, displayCurrency)
+                                                    : "—"}
                                             </span>
                                             <span className={cn("text-right text-sm font-bold",
-                                                accBalance >= 0 ? (isYearFuture ? "text-primary/70" : "text-primary") : (isYearFuture ? "text-destructive/70" : "text-destructive"))}>
-                                                {isYearFuture ? `≈ ${formatCurrencyCode(accBalance, displayCurrency)}` : formatCurrencyCode(accBalance, displayCurrency)}
+                                                accBalance >= 0 ? ((isYearFuture || isCurrent) ? "text-primary/70" : "text-primary") : ((isYearFuture || isCurrent) ? "text-destructive/70" : "text-destructive"))}>
+                                                {(isYearFuture || isCurrent) ? `≈ ${formatCurrencyCode(accBalance, displayCurrency)}` : formatCurrencyCode(accBalance, displayCurrency)}
                                             </span>
                                             {hasData
                                                 ? <ChevronDown className={cn("h-3.5 w-3.5 text-muted-foreground shrink-0 transition-transform", isExpanded && "rotate-180")} />

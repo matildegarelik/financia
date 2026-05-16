@@ -1,43 +1,65 @@
 import React, { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from "recharts";
-import { formatCurrency } from "@/lib/formatters";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import { formatCurrencyCode } from "@/lib/formatters";
 
-const COLORS = ["#27b088", "#ef4444", "#3b82f6", "#f59e0b", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316"];
+const COLORS = ["#27b088", "#3b82f6", "#f59e0b", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316", "#ef4444"];
 
-export default function SpendingChart({ transactions = [] }) {
+export default function SpendingChart({ transactions = [], convert, displayCurrency, monthLabel }) {
     const data = useMemo(() => {
-        const expenses = transactions.filter((t) => t.type === "expense");
         const byCategory = {};
-        expenses.forEach((t) => {
-            const key = t.category_name || "Sin categoría";
-            byCategory[key] = (byCategory[key] || 0) + (t.amount || 0);
-        });
+        transactions
+            .filter((t) => t.type === "expense")
+            .forEach((t) => {
+                const key = t.category_name || "Sin categoría";
+                byCategory[key] = (byCategory[key] || 0) + (convert ? convert(t.amount || 0, t.currency || "MXN") : (t.amount || 0));
+            });
         return Object.entries(byCategory)
-            .map(([name, value]) => ({ name, value }))
+            .map(([name, value]) => ({ name, value: Math.round(value * 100) / 100 }))
             .sort((a, b) => b.value - a.value)
             .slice(0, 8);
-    }, [transactions]);
+    }, [transactions, convert]);
+
+    const chartHeight = Math.max(160, data.length * 36);
 
     return (
         <Card>
-            <CardHeader>
-                <CardTitle className="text-lg">Gastos por categoría</CardTitle>
+            <CardHeader className="pb-2">
+                <CardTitle className="text-base">
+                    Gastos por categoría{monthLabel ? ` — ${monthLabel}` : ""}
+                </CardTitle>
             </CardHeader>
             <CardContent>
                 {data.length === 0 ? (
-                    <div className="h-48 flex items-center justify-center text-muted-foreground text-sm">
-                        Sin gastos este mes
+                    <div className="h-40 flex items-center justify-center text-muted-foreground text-sm">
+                        Sin gastos registrados este mes
                     </div>
                 ) : (
-                    <ResponsiveContainer width="100%" height={220}>
-                        <PieChart>
-                            <Pie data={data} cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={3} dataKey="value">
+                    <ResponsiveContainer width="100%" height={chartHeight}>
+                        <BarChart data={data} layout="vertical" margin={{ left: 0, right: 40, top: 4, bottom: 4 }}>
+                            <XAxis type="number" hide />
+                            <YAxis
+                                type="category"
+                                dataKey="name"
+                                width={110}
+                                tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                                axisLine={false}
+                                tickLine={false}
+                            />
+                            <Tooltip
+                                formatter={(v) => [formatCurrencyCode(v, displayCurrency || "MXN"), "Gasto"]}
+                                contentStyle={{ fontSize: 12, borderRadius: 8 }}
+                                cursor={{ fill: "hsl(var(--muted))", opacity: 0.5 }}
+                            />
+                            <Bar dataKey="value" radius={[0, 4, 4, 0]} label={{
+                                position: "right",
+                                fontSize: 11,
+                                fill: "hsl(var(--muted-foreground))",
+                                formatter: (v) => formatCurrencyCode(v, displayCurrency || "MXN"),
+                            }}>
                                 {data.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                            </Pie>
-                            <Tooltip formatter={(v) => formatCurrency(v)} />
-                            <Legend iconSize={10} formatter={(v) => <span className="text-xs">{v}</span>} />
-                        </PieChart>
+                            </Bar>
+                        </BarChart>
                     </ResponsiveContainer>
                 )}
             </CardContent>

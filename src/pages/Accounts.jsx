@@ -1,13 +1,14 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Wallet, CreditCard, Banknote, PiggyBank, TrendingUp, MoreHorizontal, Trash2, Pencil, Lock, Bitcoin } from "lucide-react";
+import { Plus, Wallet, CreditCard, Banknote, PiggyBank, TrendingUp, MoreHorizontal, Trash2, Pencil, Lock, Bitcoin, Star, ChevronUp, ChevronDown, GripVertical, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import PageHeader from "@/components/shared/PageHeader";
@@ -15,7 +16,7 @@ import CurrencySelector from "@/components/shared/CurrencySelector";
 import { formatCurrency, formatCurrencyCode, ACCOUNT_TYPES, CURRENCIES } from "@/lib/formatters";
 import { useCurrency } from "@/lib/currency-context";
 import { cn } from "@/lib/utils";
-import { motion } from "framer-motion";
+import { Reorder, useDragControls } from "framer-motion";
 
 const iconMap = {
     checking: Wallet, savings: PiggyBank, credit_card: CreditCard,
@@ -73,6 +74,40 @@ export default function Accounts() {
         onSuccess: () => queryClient.invalidateQueries({ queryKey: ["accounts"] }),
     });
 
+    const [localAccounts, setLocalAccounts] = useState([]);
+    const reorderTimer = useRef(null);
+
+    useEffect(() => {
+        setLocalAccounts([...accounts].sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999)));
+    }, [accounts]);
+
+    const persistOrder = (ordered) => {
+        clearTimeout(reorderTimer.current);
+        reorderTimer.current = setTimeout(async () => {
+            for (let i = 0; i < ordered.length; i++) {
+                await base44.entities.Account.update(ordered[i].id, { sort_order: i + 1 });
+            }
+            queryClient.invalidateQueries({ queryKey: ["accounts"] });
+        }, 600);
+    };
+
+    const handleReorder = (newOrder) => {
+        setLocalAccounts(newOrder);
+        persistOrder(newOrder);
+    };
+
+    const toggleFavorite = (acc) => {
+        updateMut.mutate({ id: acc.id, data: { is_favorite: !acc.is_favorite } });
+    };
+
+    const moveAccount = (idx, dir) => {
+        const newIdx = idx + dir;
+        if (newIdx < 0 || newIdx >= localAccounts.length) return;
+        const next = [...localAccounts];
+        [next[idx], next[newIdx]] = [next[newIdx], next[idx]];
+        handleReorder(next);
+    };
+
     // Balance by currency (liquid only), using computed effective balance
     const liquidAccounts = accounts.filter((a) => a.type !== "investment");
     const byCurrency = liquidAccounts.reduce((acc, a) => {
@@ -84,7 +119,8 @@ export default function Accounts() {
     const totalInDisplayCurrency = liquidAccounts.reduce(
         (s, a) => s + convert(computeEffectiveBalance(a), a.currency || "MXN"), 0
     );
-    const investedTotal = investments.reduce(
+    const activeInvestments = investments.filter((i) => !i.status || i.status === "activa");
+    const investedTotal = activeInvestments.reduce(
         (s, i) => s + convert(i.current_value || i.amount_invested || 0, i.currency || "MXN"), 0
     );
 
@@ -98,109 +134,165 @@ export default function Accounts() {
             } />
 
             {/* Balance summary */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                <Card className="col-span-2 lg:col-span-2">
-                    <CardContent className="p-4">
-                        <p className="text-sm text-muted-foreground">Total disponible</p>
-                        <p className="text-2xl font-bold text-primary">{formatCurrency(totalInDisplayCurrency, displayCurrency)}</p>
-                        <div className="flex flex-wrap gap-1.5 mt-2">
-                            {Object.entries(byCurrency).map(([c, v]) => (
-                                <Badge key={c} variant="outline" className="text-xs font-mono">
-                                    {formatCurrencyCode(v, c)}
-                                </Badge>
-                            ))}
-                        </div>
-                    </CardContent>
-                </Card>
-                <Card className="col-span-2 lg:col-span-2">
-                    <CardContent className="p-4">
-                        <p className="text-sm text-muted-foreground">Total invertido</p>
-                        <p className="text-2xl font-bold text-chart-2">{formatCurrency(investedTotal, displayCurrency)}</p>
-                        <div className="flex flex-wrap gap-1.5 mt-2">
-                            {(() => {
-                                const byC = investments.reduce((acc, i) => {
-                                    const c = i.currency || "MXN";
-                                    acc[c] = (acc[c] || 0) + (i.current_value || i.amount_invested || 0);
-                                    return acc;
-                                }, {});
-                                return Object.entries(byC).map(([c, v]) => (
-                                    <Badge key={c} variant="outline" className="text-xs font-mono">{formatCurrencyCode(v, c)}</Badge>
-                                ));
-                            })()}
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-1">No disponible para gastos</p>
-                    </CardContent>
-                </Card>
-            </div>
+            <TooltipProvider delayDuration={100}>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <Card>
+                        <CardContent className="p-4">
+                            <p className="text-sm text-muted-foreground">Total disponible</p>
+                            <p className="text-2xl font-bold text-primary">{formatCurrency(totalInDisplayCurrency, displayCurrency)}</p>
+                            <div className="flex flex-wrap gap-1.5 mt-2">
+                                {Object.entries(byCurrency).map(([c, v]) => (
+                                    <Badge key={c} variant="outline" className="text-xs font-mono">
+                                        {formatCurrencyCode(v, c)}
+                                    </Badge>
+                                ))}
+                            </div>
+                        </CardContent>
+                    </Card>
+                    <Card>
+                        <CardContent className="p-4">
+                            <p className="text-sm text-muted-foreground">Total invertido</p>
+                            <p className="text-2xl font-bold text-chart-2">{formatCurrency(investedTotal, displayCurrency)}</p>
+                            <div className="flex flex-wrap gap-1.5 mt-2">
+                                {(() => {
+                                    const byC = investments.reduce((acc, i) => {
+                                        const c = i.currency || "MXN";
+                                        acc[c] = (acc[c] || 0) + (i.current_value || i.amount_invested || 0);
+                                        return acc;
+                                    }, {});
+                                    return Object.entries(byC).map(([c, v]) => (
+                                        <Badge key={c} variant="outline" className="text-xs font-mono">{formatCurrencyCode(v, c)}</Badge>
+                                    ));
+                                })()}
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-1">No disponible para gastos</p>
+                        </CardContent>
+                    </Card>
+                    <Card className="border-chart-3/30">
+                        <CardContent className="p-4">
+                            <div className="flex items-center gap-1.5 mb-0.5">
+                                <p className="text-sm text-muted-foreground">Ahorro total</p>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <Info className="h-3.5 w-3.5 text-muted-foreground/50 cursor-help shrink-0" />
+                                    </TooltipTrigger>
+                                    <TooltipContent className="max-w-64 text-xs leading-relaxed">
+                                        Suma del saldo disponible en cuentas líquidas más el valor actual de inversiones activas. Representa tu patrimonio financiero total, incluyendo fondos no disponibles para gastos inmediatos.
+                                    </TooltipContent>
+                                </Tooltip>
+                            </div>
+                            <p className="text-2xl font-bold text-chart-3">
+                                {formatCurrency(totalInDisplayCurrency + investedTotal, displayCurrency)}
+                            </p>
+                            <p className="text-xs text-muted-foreground mt-2">
+                                Disponible {formatCurrency(totalInDisplayCurrency, displayCurrency)} + Invertido {formatCurrency(investedTotal, displayCurrency)}
+                            </p>
+                        </CardContent>
+                    </Card>
+                </div>
+            </TooltipProvider>
 
             {/* Account cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {accounts.map((acc, i) => {
-                    const Icon = iconMap[acc.type] || Wallet;
-                    const isInvestment = acc.type === "investment";
-                    return (
-                        <motion.div key={acc.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
-                            <Card className={cn("relative group hover:shadow-lg transition-shadow", isInvestment && "border-chart-2/30")}>
-                                <CardContent className="p-5">
-                                    <div className="flex items-start justify-between">
-                                        <div className="flex items-center gap-3">
-                                            <div className={cn("p-2.5 rounded-xl", isInvestment ? "bg-chart-2/10" : "bg-primary/10")}>
-                                                <Icon className={cn("h-5 w-5", isInvestment ? "text-chart-2" : "text-primary")} />
-                                            </div>
-                                            <div>
-                                                <p className="font-semibold text-sm">{acc.name}</p>
-                                                <div className="flex items-center gap-1.5 mt-0.5">
-                                                    <Badge variant="secondary" className="text-xs">{ACCOUNT_TYPES[acc.type]}</Badge>
-                                                    <Badge variant="outline" className="text-xs font-mono">{acc.currency || "MXN"}</Badge>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <DropdownMenu>
-                                            <DropdownMenuTrigger asChild>
-                                                <Button variant="ghost" size="icon" className="h-8 w-8"><MoreHorizontal className="h-4 w-4" /></Button>
-                                            </DropdownMenuTrigger>
-                                            <DropdownMenuContent align="end">
-                                                <DropdownMenuItem onClick={() => setEditing(acc)}><Pencil className="h-4 w-4 mr-2" />Editar</DropdownMenuItem>
-                                                <DropdownMenuItem className="text-destructive" onClick={() => deleteMut.mutate(acc.id)}><Trash2 className="h-4 w-4 mr-2" />Eliminar</DropdownMenuItem>
-                                            </DropdownMenuContent>
-                                        </DropdownMenu>
-                                    </div>
-                                    {(() => {
-                                        const effective = computeEffectiveBalance(acc);
-                                        const linkedInvs = investments.filter((i) => i.account_id === acc.id);
-                                        const investedAmt = linkedInvs.reduce((s, i) => s + (i.current_value || i.amount_invested || 0), 0);
-                                        const liquid = effective - investedAmt;
-                                        return (
-                                            <>
-                                                <p className={cn("text-2xl font-bold mt-4", effective >= 0 ? "text-foreground" : "text-destructive")}>
-                                                    {formatCurrency(effective, acc.currency || "MXN")}
-                                                </p>
-                                                {(acc.currency || "MXN") !== displayCurrency && (
-                                                    <p className="text-xs text-muted-foreground mt-0.5">
-                                                        ≈ {formatCurrency(convert(effective, acc.currency || "MXN"), displayCurrency)}
-                                                    </p>
-                                                )}
-                                                {linkedInvs.length > 0 && (
-                                                    <div className="mt-2 pt-2 border-t border-border/50 grid grid-cols-2 gap-x-2 text-xs">
-                                                        <span className="text-muted-foreground">Disponible</span>
-                                                        <span className="text-right font-medium text-primary">{formatCurrency(liquid, acc.currency || "MXN")}</span>
-                                                        <span className="text-muted-foreground">Invertido</span>
-                                                        <span className="text-right font-medium text-chart-2">{formatCurrency(investedAmt, acc.currency || "MXN")}</span>
-                                                    </div>
-                                                )}
-                                            </>
-                                        );
-                                    })()}
-                                </CardContent>
-                            </Card>
-                        </motion.div>
-                    );
-                })}
-            </div>
+            <Reorder.Group as="div" values={localAccounts} onReorder={handleReorder}
+                className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {localAccounts.map((acc, i) => (
+                    <SortableAccountCard
+                        key={acc.id}
+                        acc={acc}
+                        i={i}
+                        totalCount={localAccounts.length}
+                        investments={investments}
+                        computeEffectiveBalance={computeEffectiveBalance}
+                        displayCurrency={displayCurrency}
+                        convert={convert}
+                        onEdit={() => setEditing(acc)}
+                        onFavorite={() => toggleFavorite(acc)}
+                        onMoveUp={() => moveAccount(i, -1)}
+                        onMoveDown={() => moveAccount(i, 1)}
+                        onDelete={() => deleteMut.mutate(acc.id)}
+                    />
+                ))}
+            </Reorder.Group>
 
             <AccountFormDialog open={showForm || !!editing} onClose={() => { setShowForm(false); setEditing(null); }}
                 initial={editing} onSubmit={(data) => editing ? updateMut.mutate({ id: editing.id, data }) : createMut.mutate(data)} />
         </div>
+    );
+}
+
+function SortableAccountCard({ acc, i, totalCount, investments, computeEffectiveBalance, displayCurrency, convert, onEdit, onFavorite, onMoveUp, onMoveDown, onDelete }) {
+    const dragControls = useDragControls();
+    const Icon = iconMap[acc.type] || Wallet;
+    const isInvestment = acc.type === "investment";
+    const effective = computeEffectiveBalance(acc);
+    const linkedInvs = investments.filter((inv) => inv.account_id === acc.id && (!inv.status || inv.status === "activa"));
+    const investedAmt = linkedInvs.reduce((s, inv) => s + (inv.current_value || inv.amount_invested || 0), 0);
+
+    return (
+        <Reorder.Item value={acc} as="div" dragControls={dragControls} dragListener={false}>
+            <Card className={cn("relative group hover:shadow-lg transition-shadow", isInvestment && "border-chart-2/30")}>
+                <CardContent className="p-5">
+                    <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-3 min-w-0 flex-1">
+                            <div
+                                onPointerDown={(e) => { e.preventDefault(); dragControls.start(e); }}
+                                className="cursor-grab active:cursor-grabbing touch-none text-muted-foreground/25 hover:text-muted-foreground/60 transition-colors shrink-0"
+                            >
+                                <GripVertical className="h-4 w-4" />
+                            </div>
+                            <div className={cn("p-2.5 rounded-xl shrink-0", isInvestment ? "bg-chart-2/10" : "bg-primary/10")}>
+                                <Icon className={cn("h-5 w-5", isInvestment ? "text-chart-2" : "text-primary")} />
+                            </div>
+                            <div className="min-w-0">
+                                <div className="flex items-center gap-1.5">
+                                    <p className="font-semibold text-sm truncate">{acc.name}</p>
+                                    {acc.is_favorite && <Star className="h-3 w-3 text-chart-3 fill-chart-3 shrink-0" />}
+                                </div>
+                                <div className="flex items-center gap-1.5 mt-0.5">
+                                    <Badge variant="secondary" className="text-xs">{ACCOUNT_TYPES[acc.type]}</Badge>
+                                    <Badge variant="outline" className="text-xs font-mono">{acc.currency || "MXN"}</Badge>
+                                </div>
+                            </div>
+                        </div>
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0"><MoreHorizontal className="h-4 w-4" /></Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={onEdit}><Pencil className="h-4 w-4 mr-2" />Editar</DropdownMenuItem>
+                                <DropdownMenuItem onClick={onFavorite}>
+                                    <Star className={cn("h-4 w-4 mr-2", acc.is_favorite ? "fill-chart-3 text-chart-3" : "")} />
+                                    {acc.is_favorite ? "Quitar de favoritas" : "Marcar como favorita"}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={onMoveUp} disabled={i === 0}>
+                                    <ChevronUp className="h-4 w-4 mr-2" />Subir
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={onMoveDown} disabled={i === totalCount - 1}>
+                                    <ChevronDown className="h-4 w-4 mr-2" />Bajar
+                                </DropdownMenuItem>
+                                <DropdownMenuItem className="text-destructive" onClick={onDelete}>
+                                    <Trash2 className="h-4 w-4 mr-2" />Eliminar
+                                </DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                    </div>
+                    <p className={cn("text-2xl font-bold mt-4", effective >= 0 ? "text-foreground" : "text-destructive")}>
+                        {formatCurrency(effective, acc.currency || "MXN")}
+                    </p>
+                    {(acc.currency || "MXN") !== displayCurrency && (
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                            ≈ {formatCurrency(convert(effective, acc.currency || "MXN"), displayCurrency)}
+                        </p>
+                    )}
+                    {linkedInvs.length > 0 && (
+                        <div className="mt-2 pt-2 border-t border-border/50 grid grid-cols-2 gap-x-2 text-xs">
+                            <span className="text-muted-foreground">Inversiones activas</span>
+                            <span className="text-right font-medium text-chart-2">{formatCurrency(investedAmt, acc.currency || "MXN")}</span>
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
+        </Reorder.Item>
     );
 }
 

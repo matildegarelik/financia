@@ -33,36 +33,46 @@ export default function TransactionFormProjected({ open, onClose, onSubmit, acco
 
     const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
-    const handleCategoryChange = (catId) => {
-        const cat = categories.find((c) => c.id === catId);
-        set("category_id", catId);
-        set("category_name", cat?.name || "");
+    const handleCategoryChange = (val) => {
+        if (val === "none") {
+            set("category_id", "");
+            set("category_name", "");
+        } else {
+            const cat = categories.find((c) => c.id === val);
+            set("category_id", val);
+            set("category_name", cat?.name || "");
+        }
     };
 
     const handleSubmit = (e) => {
         e.preventDefault();
-        const data = {
+        onSubmit({
             ...form,
             amount: parseFloat(form.amount) || 0,
             status: "projected",
-            // Convert empty strings to null for UUID columns
             category_id: form.category_id || null,
             account_id: form.account_id || null,
-        };
-        onSubmit(data);
+        });
     };
 
-    const filteredCategories = categories.filter((c) => c.type === form.type);
+    const filteredCategories = categories
+        .filter((c) => c.type === form.type)
+        .sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999));
 
-    // Build hierarchical order: parents then their children indented
+    // Build hierarchical order: parents (sorted) then their children
     const catParents = filteredCategories.filter((c) => !c.parent_category);
     const catChildren = filteredCategories.filter((c) => !!c.parent_category);
     const orderedCats = [];
     catParents.forEach((p) => {
         orderedCats.push({ ...p, isParent: true });
-        catChildren.filter((c) => c.parent_category === p.id).forEach((c) => orderedCats.push({ ...c, isParent: false }));
+        catChildren
+            .filter((c) => c.parent_category === p.id)
+            .sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999))
+            .forEach((c) => orderedCats.push({ ...c, isParent: false }));
     });
     catChildren.filter((c) => !catParents.find((p) => p.id === c.parent_category)).forEach((c) => orderedCats.push({ ...c, isParent: false }));
+
+    const sortedAccounts = [...accounts].sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999));
 
     return (
         <Dialog open={open} onOpenChange={onClose}>
@@ -76,7 +86,7 @@ export default function TransactionFormProjected({ open, onClose, onSubmit, acco
                         {["income", "expense"].map((t) => (
                             <Button key={t} type="button" size="sm"
                                 variant={form.type === t ? "default" : "outline"}
-                                onClick={() => set("type", t)}>
+                                onClick={() => { set("type", t); set("category_id", ""); set("category_name", ""); }}>
                                 {t === "income" ? "Ingreso" : "Gasto"}
                             </Button>
                         ))}
@@ -116,10 +126,15 @@ export default function TransactionFormProjected({ open, onClose, onSubmit, acco
                                 }} required />
                         </div>
                         <div>
-                            <Label>Categoría</Label>
-                            <Select value={form.category_id || ""} onValueChange={handleCategoryChange}>
-                                <SelectTrigger><SelectValue placeholder="Categoría" /></SelectTrigger>
+                            <Label>
+                                Categoría <span className="text-muted-foreground font-normal text-xs">(opcional)</span>
+                            </Label>
+                            <Select value={form.category_id || "none"} onValueChange={handleCategoryChange}>
+                                <SelectTrigger><SelectValue /></SelectTrigger>
                                 <SelectContent>
+                                    <SelectItem value="none">
+                                        <span className="text-muted-foreground">General (sin categoría)</span>
+                                    </SelectItem>
                                     {orderedCats.map((c) => (
                                         <SelectItem key={c.id} value={c.id}>
                                             {c.isParent ? c.name : `  ↳ ${c.name}`}
@@ -129,6 +144,21 @@ export default function TransactionFormProjected({ open, onClose, onSubmit, acco
                             </Select>
                         </div>
                     </div>
+
+                    {sortedAccounts.length > 0 && (
+                        <div>
+                            <Label>Cuenta <span className="text-muted-foreground font-normal text-xs">(opcional)</span></Label>
+                            <Select value={form.account_id || "none"} onValueChange={(v) => set("account_id", v === "none" ? "" : v)}>
+                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="none"><span className="text-muted-foreground">Sin cuenta</span></SelectItem>
+                                    {sortedAccounts.map((a) => (
+                                        <SelectItem key={a.id} value={a.id}>{a.name} ({a.currency || "MXN"})</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    )}
 
                     <div className="grid grid-cols-2 gap-2">
                         <div>

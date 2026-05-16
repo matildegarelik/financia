@@ -1,29 +1,30 @@
-import React, { useState } from "react";
+import React, { useMemo } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery } from "@tanstack/react-query";
-import { Wallet, TrendingUp, TrendingDown, Calendar, ChevronRight } from "lucide-react";
-import { formatCurrency, getCurrentMonth, TODAY } from "@/lib/formatters";
-import { useCurrency } from "@/lib/currency-context";
-import StatCard from "@/components/shared/StatCard";
-import PageHeader from "@/components/shared/PageHeader";
-import RecentTransactions from "@/components/dashboard/RecentTransactions";
-import SpendingChart from "@/components/dashboard/SpendingChart";
-import BudgetOverview from "@/components/dashboard/BudgetOverview";
-import BalanceCard from "@/components/dashboard/BalanceCard";
-import CurrencySelector from "@/components/shared/CurrencySelector";
-import { Skeleton } from "@/components/ui/skeleton";
+import { useNavigate, Link } from "react-router-dom";
+import { Plus, ArrowDownLeft, ArrowUpRight, ArrowLeftRight, Star, ChevronRight, Info } from "lucide-react";
+import { format } from "date-fns";
+import { es } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Progress } from "@/components/ui/progress";
+import { Skeleton } from "@/components/ui/skeleton";
+import CurrencySelector from "@/components/shared/CurrencySelector";
+import SpendingChart from "@/components/dashboard/SpendingChart";
+import { formatCurrency, formatCurrencyCode, formatDate, getCurrentMonth, TODAY } from "@/lib/formatters";
+import { useCurrency } from "@/lib/currency-context";
 import { cn } from "@/lib/utils";
+import { format as fnsFormat, startOfMonth, endOfMonth } from "date-fns";
+
+const typeConfig = {
+    income: { icon: ArrowDownLeft, label: "Ingreso", color: "text-primary", bg: "bg-primary/10" },
+    expense: { icon: ArrowUpRight, label: "Gasto", color: "text-destructive", bg: "bg-destructive/10" },
+    transfer: { icon: ArrowLeftRight, label: "Transferencia", color: "text-chart-2", bg: "bg-chart-2/10" },
+};
 
 export default function Dashboard() {
-    const [horizon, setHorizon] = useState("now");
-    const [projectedDate, setProjectedDate] = useState(() => {
-        const d = new Date();
-        d.setMonth(d.getMonth() + 3);
-        return d.toISOString().split("T")[0];
-    });
+    const navigate = useNavigate();
     const { displayCurrency, convert } = useCurrency();
 
     const { data: transactions = [], isLoading: loadingTx } = useQuery({
@@ -38,88 +39,352 @@ export default function Dashboard() {
         queryKey: ["budgets"],
         queryFn: () => base44.entities.Budget.list(),
     });
+    const { data: categories = [] } = useQuery({
+        queryKey: ["categories"],
+        queryFn: () => base44.entities.Category.list(),
+    });
     const { data: investments = [] } = useQuery({
         queryKey: ["investments"],
         queryFn: () => base44.entities.Investment.list(),
     });
 
     const currentMonth = getCurrentMonth();
-    // Only confirmed past transactions for monthly stats
-    const monthlyTx = transactions.filter(
-        (t) => t.date?.startsWith(currentMonth) && t.date <= TODAY && t.status !== "projected"
-    );
-    const monthlyIncome = monthlyTx.filter((t) => t.type === "income").reduce((s, t) => s + convert(t.amount || 0, t.currency || "MXN"), 0);
-    const monthlyExpense = monthlyTx.filter((t) => t.type === "expense").reduce((s, t) => s + convert(t.amount || 0, t.currency || "MXN"), 0);
+    const monthLabel = format(new Date(), "MMMM yyyy", { locale: es });
+    const monthStart = fnsFormat(startOfMonth(new Date()), "yyyy-MM-dd");
+    const monthEnd = fnsFormat(endOfMonth(new Date()), "yyyy-MM-dd");
 
-    const futureTx = transactions.filter((t) => t.date > TODAY && t.status !== "projected");
+    const hour = new Date().getHours();
+    const greeting = hour < 12 ? "Buenos días" : hour < 18 ? "Buenas tardes" : "Buenas noches";
+
+    // Confirmed real transactions this month (no future, no projected)
+    const monthlyTx = useMemo(() =>
+        transactions.filter((t) =>
+            t.date?.startsWith(currentMonth) && t.date <= TODAY && t.status !== "projected"
+        ), [transactions, currentMonth]);
+
+    const monthlyIncome = useMemo(() =>
+        monthlyTx.filter((t) => t.type === "income").reduce((s, t) => s + convert(t.amount || 0, t.currency || "MXN"), 0),
+        [monthlyTx, convert]);
+
+    const monthlyExpense = useMemo(() =>
+        monthlyTx.filter((t) => t.type === "expense").reduce((s, t) => s + convert(t.amount || 0, t.currency || "MXN"), 0),
+        [monthlyTx, convert]);
+
+    const netMonth = monthlyIncome - monthlyExpense;
+
+    // Effective balance per account
+    function computeEffective(acc) {
+        return transactions
+            .filter((tx) => tx.status !== "projected" && tx.date && tx.date <= TODAY)
+            .reduce((sum, tx) => {
+                if (tx.account_id === acc.id) {
+                    if (tx.type === "income") return sum + (tx.amount || 0);
+                    if (tx.type === "expense") return sum - (tx.amount || 0);
+                    if (tx.type === "transfer") return sum - (tx.amount || 0);
+                }
+                if (tx.to_account_id === acc.id && tx.type === "transfer") return sum + (tx.amount || 0);
+                return sum;
+            }, acc.balance || 0);
+    }
+
+    const liquidAccounts = accounts.filter((a) => a.type !== "investment");
+    const liquidBalance = useMemo(() =>
+        liquidAccounts.reduce((s, a) => s + convert(computeEffective(a), a.currency || "MXN"), 0),
+        [accounts, transactions, convert]);
+
+    const investedTotal = useMemo(() =>
+        investments
+            .filter((i) => !i.status || i.status === "activa")
+            .reduce((s, i) => s + convert(i.current_value || i.amount_invested || 0, i.currency || "MXN"), 0),
+        [investments, convert]);
+
+    const totalSavings = liquidBalance + investedTotal;
+
+    // Recent transactions — confirmed, real, most recent first
+    const recentTx = useMemo(() =>
+        transactions
+            .filter((t) => t.status !== "projected" && t.date && t.date <= TODAY)
+            .slice(0, 8),
+        [transactions]);
+
+    // Favorite accounts
+    const favoriteAccounts = useMemo(() =>
+        accounts
+            .filter((a) => a.is_favorite)
+            .sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999)),
+        [accounts]);
+
+    // Budgets current month
+    const monthBudgets = useMemo(() =>
+        budgets.filter((b) => b.month === currentMonth).slice(0, 6),
+        [budgets, currentMonth]);
+
+    const getMatchingCategoryIds = (budget) => {
+        if (!budget.category_id) return null;
+        const ids = new Set([budget.category_id]);
+        categories.forEach((c) => { if (c.parent_category === budget.category_id) ids.add(c.id); });
+        return ids;
+    };
+
+    const getBudgetSpent = (b) => {
+        const matchIds = getMatchingCategoryIds(b);
+        return transactions
+            .filter((tx) => {
+                if (tx.type !== "expense" || tx.status === "projected") return false;
+                if (!tx.date || tx.date < monthStart || tx.date > monthEnd) return false;
+                if (matchIds && tx.category_id && matchIds.has(tx.category_id)) return true;
+                if (!matchIds && b.category_name && tx.category_name === b.category_name) return true;
+                return false;
+            })
+            .reduce((s, tx) => s + (tx.amount || 0), 0);
+    };
+
     const isLoading = loadingTx || loadingAcc;
 
     if (isLoading) {
         return (
-            <div className="space-y-6">
+            <div className="space-y-4">
                 <Skeleton className="h-10 w-48" />
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                    {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-28 rounded-lg" />)}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                    {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-24 rounded-lg" />)}
                 </div>
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-64 rounded-lg" />)}
-                </div>
+                <Skeleton className="h-48 rounded-lg" />
             </div>
         );
     }
 
+    const TxRow = ({ tx, compact = false }) => {
+        const cfg = typeConfig[tx.type] || typeConfig.expense;
+        const Icon = cfg.icon;
+        return (
+            <div className={cn("flex items-center gap-3", compact ? "py-2 px-4" : "py-2.5 px-2 rounded-lg hover:bg-muted/40 transition-colors")}>
+                <div className={cn("rounded-lg shrink-0", cfg.bg, compact ? "p-1.5" : "p-2")}>
+                    <Icon className={cn(cfg.color, compact ? "h-3.5 w-3.5" : "h-4 w-4")} />
+                </div>
+                <div className="flex-1 min-w-0">
+                    <p className={cn("font-medium truncate", compact ? "text-sm" : "text-sm")}>
+                        {tx.description || cfg.label}
+                    </p>
+                    <p className="text-xs text-muted-foreground truncate">
+                        {tx.category_name ? `${tx.category_name} · ` : ""}{formatDate(tx.date)}
+                    </p>
+                </div>
+                <div className="text-right shrink-0">
+                    <p className={cn("font-semibold", cfg.color, compact ? "text-sm" : "text-sm")}>
+                        {tx.type === "income" ? "+" : tx.type === "expense" ? "−" : ""}
+                        {formatCurrencyCode(tx.amount, tx.currency || "MXN")}
+                    </p>
+                    {tx.currency && tx.currency !== displayCurrency && (
+                        <p className="text-[10px] text-muted-foreground">
+                            ≈ {formatCurrencyCode(convert(tx.amount, tx.currency), displayCurrency)}
+                        </p>
+                    )}
+                </div>
+            </div>
+        );
+    };
+
     return (
-        <div className="space-y-5">
-            <div className="flex items-start justify-between gap-3 flex-wrap">
-                <PageHeader title="Dashboard" description="Resumen financiero personal" />
-                <CurrencySelector />
+        <div className="space-y-4">
+
+            {/* ── Mobile header: greeting + quick add + recent transactions ── */}
+            <div className="lg:hidden space-y-3">
+                <div className="flex items-center justify-between">
+                    <div>
+                        <p className="text-xl font-bold">{greeting}</p>
+                        <p className="text-sm text-muted-foreground capitalize">
+                            {format(new Date(), "EEEE d 'de' MMMM", { locale: es })}
+                        </p>
+                    </div>
+                    <Button onClick={() => navigate("/transactions?new=1")} size="sm">
+                        <Plus className="h-4 w-4 mr-1.5" />Nueva
+                    </Button>
+                </div>
+
+                {/* Recent transactions — mobile top */}
+                <Card className="overflow-hidden">
+                    <div className="flex items-center justify-between px-4 pt-3 pb-2">
+                        <p className="text-sm font-semibold">Últimas transacciones</p>
+                        <Link to="/transactions" className="text-xs text-primary flex items-center gap-0.5">
+                            Ver todas <ChevronRight className="h-3.5 w-3.5" />
+                        </Link>
+                    </div>
+                    {recentTx.length === 0 ? (
+                        <p className="text-sm text-muted-foreground px-4 pb-4">No hay transacciones aún.</p>
+                    ) : (
+                        <div className="divide-y">
+                            {recentTx.slice(0, 5).map((tx) => <TxRow key={tx.id} tx={tx} compact />)}
+                        </div>
+                    )}
+                    <div className="px-4 py-2 border-t">
+                        <Button variant="ghost" size="sm" className="w-full text-xs h-8"
+                            onClick={() => navigate("/transactions?new=1")}>
+                            <Plus className="h-3.5 w-3.5 mr-1" />Registrar transacción
+                        </Button>
+                    </div>
+                </Card>
             </div>
 
-            {/* Horizon selector */}
-            <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
-                <Tabs value={horizon} onValueChange={setHorizon}>
-                    <TabsList className="h-9">
-                        <TabsTrigger value="now" className="text-xs px-3">Hoy</TabsTrigger>
-                        <TabsTrigger value="certain" className="text-xs px-3">Futuro certero</TabsTrigger>
-                        <TabsTrigger value="projected" className="text-xs px-3">Proyectado</TabsTrigger>
-                    </TabsList>
-                </Tabs>
-                {horizon !== "now" && (
-                    <div className="flex items-center gap-2">
-                        <Calendar className="h-4 w-4 text-muted-foreground" />
-                        <Input type="date" value={projectedDate} onChange={(e) => setProjectedDate(e.target.value)}
-                            className="h-8 w-40 text-sm" min={TODAY} />
+            {/* ── Desktop header ── */}
+            <div className="hidden lg:flex items-center justify-between gap-3 flex-wrap">
+                <div>
+                    <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
+                    <p className="text-sm text-muted-foreground capitalize mt-0.5">{monthLabel}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                    <CurrencySelector />
+                    <Button onClick={() => navigate("/transactions?new=1")} size="sm">
+                        <Plus className="h-4 w-4 mr-1.5" />Nueva transacción
+                    </Button>
+                </div>
+            </div>
+
+            {/* ── Stats — hidden on mobile ── */}
+            <TooltipProvider delayDuration={100}>
+                <div className="hidden lg:grid grid-cols-4 gap-3">
+                    {[
+                        { label: "Ingresos", value: monthlyIncome, positive: true },
+                        { label: "Gastos", value: monthlyExpense, positive: false },
+                        { label: "Balance del mes", value: netMonth, positive: netMonth >= 0, colored: true },
+                        {
+                            label: "Ahorro total", value: totalSavings, positive: totalSavings >= 0, colored: true,
+                            info: `Saldo disponible en cuentas líquidas (${formatCurrencyCode(liquidBalance, displayCurrency)}) más el valor actual de inversiones activas (${formatCurrencyCode(investedTotal, displayCurrency)}). Incluye fondos no disponibles para gastos inmediatos.`,
+                        },
+                    ].map(({ label, value, positive, colored, info }) => (
+                        <Card key={label}>
+                            <CardContent className="p-3 sm:p-4">
+                                <div className="flex items-center gap-1 mb-1">
+                                    <p className="text-xs text-muted-foreground leading-tight">{label}</p>
+                                    {info && (
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <Info className="h-3 w-3 text-muted-foreground/50 cursor-help shrink-0" />
+                                            </TooltipTrigger>
+                                            <TooltipContent className="max-w-64 text-xs leading-relaxed">
+                                                {info}
+                                            </TooltipContent>
+                                        </Tooltip>
+                                    )}
+                                </div>
+                                <p className={cn(
+                                    "text-lg sm:text-xl font-bold leading-none",
+                                    colored ? (positive ? "text-primary" : "text-destructive") : "text-foreground"
+                                )}>
+                                    {formatCurrencyCode(value, displayCurrency)}
+                                </p>
+                            </CardContent>
+                        </Card>
+                    ))}
+                </div>
+            </TooltipProvider>
+
+            {/* ── Favorite accounts ── */}
+            {favoriteAccounts.length > 0 && (
+                <div className="space-y-2">
+                    <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+                        <Star className="h-3.5 w-3.5 fill-current text-chart-3" />
+                        Cuentas favoritas
+                    </p>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+                        {favoriteAccounts.map((acc) => {
+                            const effective = computeEffective(acc);
+                            return (
+                                <Card key={acc.id}>
+                                    <CardContent className="p-3">
+                                        <p className="text-xs text-muted-foreground truncate">{acc.name}</p>
+                                        <p className={cn("text-base font-bold mt-0.5 truncate", effective < 0 ? "text-destructive" : "text-foreground")}>
+                                            {formatCurrencyCode(effective, acc.currency || "MXN")}
+                                        </p>
+                                        {(acc.currency || "MXN") !== displayCurrency && (
+                                            <p className="text-[10px] text-muted-foreground mt-0.5">
+                                                ≈ {formatCurrencyCode(convert(effective, acc.currency || "MXN"), displayCurrency)}
+                                            </p>
+                                        )}
+                                    </CardContent>
+                                </Card>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
+
+            {/* ── Budget — visible on mobile + inside desktop grid ── */}
+            {(() => {
+                const budgetCard = (
+                    <Card>
+                        <CardHeader className="pb-2 flex flex-row items-center justify-between">
+                            <CardTitle className="text-base">Presupuestos</CardTitle>
+                            <Link to="/budgets" className="text-xs text-primary">Ver todos</Link>
+                        </CardHeader>
+                        <CardContent>
+                            {monthBudgets.length === 0 ? (
+                                <div className="h-24 flex items-center justify-center text-center text-muted-foreground text-sm">
+                                    <div>
+                                        <p>Sin presupuestos este mes</p>
+                                        <Link to="/budgets" className="text-xs text-primary mt-1 block">Crear →</Link>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="space-y-3">
+                                    {monthBudgets.map((b) => {
+                                        const spent = getBudgetSpent(b);
+                                        const pct = b.amount > 0 ? Math.min((spent / b.amount) * 100, 100) : 0;
+                                        const over = spent > b.amount;
+                                        return (
+                                            <div key={b.id} className="space-y-1">
+                                                <div className="flex items-center justify-between text-xs">
+                                                    <span className="font-medium truncate max-w-[60%]">{b.category_name}</span>
+                                                    <span className={cn("font-medium", over ? "text-destructive" : "text-muted-foreground")}>
+                                                        {formatCurrencyCode(spent, b.currency || "MXN")} / {formatCurrencyCode(b.amount, b.currency || "MXN")}
+                                                    </span>
+                                                </div>
+                                                <Progress value={pct}
+                                                    className={cn(over ? "[&>div]:bg-destructive" : pct > 80 ? "[&>div]:bg-yellow-500" : "[&>div]:bg-primary")} />
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </CardContent>
+                    </Card>
+                );
+                return (
+                    <>
+                        {/* Mobile: budget below favorite accounts */}
+                        <div className="lg:hidden">{budgetCard}</div>
+
+                        {/* Desktop: chart (2/3) + budget (1/3) side by side */}
+                        <div className="hidden lg:grid grid-cols-3 gap-4">
+                            <div className="col-span-2">
+                                <SpendingChart
+                                    transactions={monthlyTx}
+                                    convert={convert}
+                                    displayCurrency={displayCurrency}
+                                    monthLabel={monthLabel}
+                                />
+                            </div>
+                            {budgetCard}
+                        </div>
+                    </>
+                );
+            })()}
+
+            {/* ── Recent transactions — desktop only (mobile shows at top) ── */}
+            <Card className="hidden lg:block overflow-hidden">
+                <div className="flex items-center justify-between px-6 pt-4 pb-3">
+                    <p className="font-semibold">Transacciones recientes</p>
+                    <Link to="/transactions" className="text-sm text-primary flex items-center gap-0.5">
+                        Ver todas <ChevronRight className="h-4 w-4" />
+                    </Link>
+                </div>
+                {recentTx.length === 0 ? (
+                    <p className="text-sm text-muted-foreground px-6 pb-6">No hay transacciones aún.</p>
+                ) : (
+                    <div className="divide-y px-4 pb-2">
+                        {recentTx.map((tx) => <TxRow key={tx.id} tx={tx} />)}
                     </div>
                 )}
-            </div>
-
-            {/* Stat cards */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                <StatCard title="Ingresos del mes" value={formatCurrency(monthlyIncome, displayCurrency)} icon={TrendingUp} trendUp />
-                <StatCard title="Gastos del mes" value={formatCurrency(monthlyExpense, displayCurrency)} icon={TrendingDown} />
-                <StatCard title="Saldo neto" value={formatCurrency(monthlyIncome - monthlyExpense, displayCurrency)}
-                    icon={Wallet} trendUp={monthlyIncome >= monthlyExpense} />
-                <StatCard title="Mov. futuros" value={futureTx.length} icon={Calendar} subtitle="programados" />
-            </div>
-
-            {/* Balance cards por horizonte */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                <div className="lg:col-span-2">
-                    <BalanceCard
-                        accounts={accounts}
-                        transactions={transactions}
-                        investments={investments}
-                        horizon={horizon}
-                        projectedDate={projectedDate}
-                    />
-                </div>
-                <BudgetOverview budgets={budgets} transactions={transactions} />
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <SpendingChart transactions={monthlyTx} />
-                <RecentTransactions transactions={transactions.filter((t) => t.date <= TODAY && t.status !== "projected").slice(0, 6)} />
-            </div>
+            </Card>
         </div>
     );
 }

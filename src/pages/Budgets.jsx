@@ -103,14 +103,16 @@ export default function Budgets() {
             <PageHeader
                 title="Presupuestos"
                 action={
-                    <div className="flex gap-2">
-                        {budgets.length === 0 && prevBudgets.length > 0 && (
-                            <Button variant="outline" size="sm" onClick={copyFromLastMonth}>
-                                <RefreshCw className="h-4 w-4 mr-1.5" />Copiar del mes anterior
-                            </Button>
-                        )}
-                        <Button size="sm" onClick={() => setShowForm(true)}><Plus className="h-4 w-4 mr-1.5" />Nuevo</Button>
-                    </div>
+                    budgets.length > 0 ? (
+                        <div className="flex flex-col sm:flex-row gap-2">
+                            {prevBudgets.length > 0 && (
+                                <Button variant="outline" size="sm" onClick={copyFromLastMonth}>
+                                    <RefreshCw className="h-4 w-4 mr-1.5" />Copiar del mes anterior
+                                </Button>
+                            )}
+                            <Button size="sm" onClick={() => setShowForm(true)}><Plus className="h-4 w-4 mr-1.5" />Nuevo</Button>
+                        </div>
+                    ) : null
                 }
             />
 
@@ -157,7 +159,7 @@ export default function Budgets() {
                     <p className="text-sm mb-4">
                         {prevBudgets.length > 0 ? "Puedes copiar los del mes anterior o crear nuevos." : "Crea tu primer presupuesto."}
                     </p>
-                    <div className="flex gap-2 justify-center">
+                    <div className="flex flex-col sm:flex-row gap-2 justify-center items-center">
                         {prevBudgets.length > 0 && (
                             <Button variant="outline" onClick={copyFromLastMonth}>
                                 <RefreshCw className="h-4 w-4 mr-1.5" />Copiar del mes anterior
@@ -236,9 +238,9 @@ function BudgetFormDialog({ open, onClose, onSubmit, initial, categories, monthK
         set("category_name", cat?.name || "");
     };
 
-    // Build ordered list: parents first, then their children indented
-    const parents = categories.filter((c) => !c.parent_category);
-    const children = categories.filter((c) => !!c.parent_category);
+    // Build ordered list: parents first (by sort_order), then their children indented
+    const parents = [...categories.filter((c) => !c.parent_category)].sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999));
+    const children = [...categories.filter((c) => !!c.parent_category)].sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999));
     const orderedCats = [];
     parents.forEach((p) => {
         orderedCats.push({ ...p, isParent: true });

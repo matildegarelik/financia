@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, Search, Trash2, Upload, ChevronDown, ChevronUp, Briefcase, Filter } from "lucide-react";
@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import PageHeader from "@/components/shared/PageHeader";
 import TransactionForm from "@/components/transactions/TransactionForm";
 import { formatCurrency, formatCurrencyCode, formatDate, TRANSACTION_STATUS, TODAY } from "@/lib/formatters";
@@ -28,10 +29,19 @@ export default function Transactions() {
     const [showForm, setShowForm] = useState(false);
     const [editing, setEditing] = useState(null);
     const [showImport, setShowImport] = useState(false);
+
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get("new") === "1") {
+            setShowForm(true);
+            window.history.replaceState({}, "", "/transactions");
+        }
+    }, []);
     const [search, setSearch] = useState("");
     const [typeFilter, setTypeFilter] = useState("all");
     const [statusTab, setStatusTab] = useState("present");
     const [expanded, setExpanded] = useState({});
+    const [deleteConfirm, setDeleteConfirm] = useState(null);
     const queryClient = useQueryClient();
     const { convert, displayCurrency } = useCurrency();
 
@@ -90,6 +100,30 @@ export default function Transactions() {
         mutationFn: (id) => base44.entities.Transaction.delete(id),
         onSuccess: () => queryClient.invalidateQueries({ queryKey: ["transactions"] }),
     });
+    const deleteAllMut = useMutation({
+        mutationFn: (ids) => Promise.all(ids.map((id) => base44.entities.Transaction.delete(id))),
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: ["transactions"] }),
+    });
+
+    const getRelatedInstallments = (tx) =>
+        transactions.filter(
+            (t) =>
+                t.id !== tx.id &&
+                t.is_recurring &&
+                t.type === tx.type &&
+                t.recurring_frequency === tx.recurring_frequency &&
+                t.description === tx.description &&
+                t.account_id === tx.account_id
+        );
+
+    const handleDeleteClick = (e, tx) => {
+        e.stopPropagation();
+        if (tx.status === "installment") {
+            setDeleteConfirm(tx);
+        } else {
+            deleteMut.mutate(tx.id);
+        }
+    };
 
     // "present" = confirmed + past installments; "future" = future installments
     const filtered = transactions.filter((t) => {
@@ -218,7 +252,7 @@ export default function Transactions() {
                                                 </button>
                                             )}
                                             <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                                                onClick={(e) => { e.stopPropagation(); deleteMut.mutate(tx.id); }}>
+                                                onClick={(e) => handleDeleteClick(e, tx)}>
                                                 <Trash2 className="h-3.5 w-3.5" />
                                             </Button>
                                         </div>
@@ -252,6 +286,45 @@ export default function Transactions() {
             <ImportModal open={showImport} onClose={() => setShowImport(false)}
                 accounts={accounts} categories={categories}
                 onImported={() => queryClient.invalidateQueries({ queryKey: ["transactions"] })} />
+
+            {/* Delete installment confirmation */}
+            {deleteConfirm && (() => {
+                const related = getRelatedInstallments(deleteConfirm);
+                const total = related.length + 1;
+                return (
+                    <Dialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
+                        <DialogContent className="max-w-sm">
+                            <DialogHeader>
+                                <DialogTitle>Eliminar cuota</DialogTitle>
+                            </DialogHeader>
+                            <p className="text-sm text-muted-foreground">
+                                <span className="font-medium text-foreground">
+                                    {deleteConfirm.description || (deleteConfirm.type === "income" ? "Ingreso" : "Gasto")}
+                                </span>{" "}
+                                es parte de una serie recurrente.
+                                {total > 1 && ` Hay ${total} cuotas en total.`}
+                            </p>
+                            <div className="flex flex-col gap-2 pt-1">
+                                <Button variant="outline" className="justify-start" onClick={() => {
+                                    deleteMut.mutate(deleteConfirm.id);
+                                    setDeleteConfirm(null);
+                                }}>
+                                    Eliminar solo esta cuota
+                                </Button>
+                                {total > 1 && (
+                                    <Button variant="destructive" className="justify-start" onClick={() => {
+                                        deleteAllMut.mutate([deleteConfirm.id, ...related.map((t) => t.id)]);
+                                        setDeleteConfirm(null);
+                                    }}>
+                                        Eliminar todas las cuotas ({total})
+                                    </Button>
+                                )}
+                                <Button variant="ghost" onClick={() => setDeleteConfirm(null)}>Cancelar</Button>
+                            </div>
+                        </DialogContent>
+                    </Dialog>
+                );
+            })()}
         </div>
     );
 }

@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Trash2, Pencil, Tag, ChevronDown, ChevronRight } from "lucide-react";
+import { Plus, Trash2, Pencil, Tag, ChevronDown, ChevronRight, Star, ChevronUp, GripVertical } from "lucide-react";
+import { Reorder, useDragControls } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -42,8 +43,38 @@ export default function Categories() {
         onSuccess: () => queryClient.invalidateQueries({ queryKey: ["categories"] }),
     });
 
+    const toggleFavorite = (cat) => updateMut.mutate({ id: cat.id, data: { is_favorite: !cat.is_favorite } });
+
+    const [localParents, setLocalParents] = useState([]);
+    const reorderTimer = useRef(null);
+
     const typeFiltered = tab === "all" ? categories : categories.filter((c) => c.type === tab);
-    const parents = typeFiltered.filter((c) => !c.parent_category);
+    const parents = [...typeFiltered.filter((c) => !c.parent_category)].sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999));
+
+    useEffect(() => { setLocalParents(parents); }, [categories, tab]);
+
+    const persistOrder = (ordered) => {
+        clearTimeout(reorderTimer.current);
+        reorderTimer.current = setTimeout(async () => {
+            for (let i = 0; i < ordered.length; i++) {
+                await base44.entities.Category.update(ordered[i].id, { sort_order: i + 1 });
+            }
+            queryClient.invalidateQueries({ queryKey: ["categories"] });
+        }, 600);
+    };
+
+    const handleParentsReorder = (newOrder) => {
+        setLocalParents(newOrder);
+        persistOrder(newOrder);
+    };
+
+    const moveParent = (idx, dir) => {
+        const newIdx = idx + dir;
+        if (newIdx < 0 || newIdx >= localParents.length) return;
+        const next = [...localParents];
+        [next[idx], next[newIdx]] = [next[newIdx], next[idx]];
+        handleParentsReorder(next);
+    };
     const childrenAll = typeFiltered.filter((c) => !!c.parent_category);
     const byParent = {};
     childrenAll.forEach((c) => {
@@ -60,8 +91,23 @@ export default function Categories() {
         </Badge>
     );
 
-    const ActionBtns = ({ cat }) => (
+    const ActionBtns = ({ cat, idx, total, onMoveUp, onMoveDown }) => (
         <div className="flex gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={(e) => { e.stopPropagation(); toggleFavorite(cat); }}>
+                <Star className={cn("h-3 w-3", cat.is_favorite ? "fill-chart-3 text-chart-3" : "text-muted-foreground")} />
+            </Button>
+            {onMoveUp && (
+                <Button variant="ghost" size="icon" className="h-6 w-6" disabled={idx === 0}
+                    onClick={(e) => { e.stopPropagation(); onMoveUp(); }}>
+                    <ChevronUp className="h-3 w-3" />
+                </Button>
+            )}
+            {onMoveDown && (
+                <Button variant="ghost" size="icon" className="h-6 w-6" disabled={idx === total - 1}
+                    onClick={(e) => { e.stopPropagation(); onMoveDown(); }}>
+                    <ChevronDown className="h-3 w-3" />
+                </Button>
+            )}
             <Button variant="ghost" size="icon" className="h-6 w-6" onClick={(e) => { e.stopPropagation(); setEditing(cat); }}>
                 <Pencil className="h-3 w-3" />
             </Button>
@@ -91,43 +137,24 @@ export default function Categories() {
                 <p className="text-sm text-muted-foreground text-center py-8">No hay categorías. Creá la primera.</p>
             ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {/* Parent categories with collapsible children */}
-                    {parents.map((parent) => {
-                        const children = byParent[parent.id] || [];
-                        const open = isExpanded(parent.id);
-                        return (
-                            <Card key={parent.id} className="overflow-hidden">
-                                <button
-                                    type="button"
-                                    onClick={() => children.length > 0 && toggle(parent.id)}
-                                    className="group w-full flex items-center gap-2 px-3 py-2.5 hover:bg-muted/50 transition-colors text-left"
-                                    style={{ cursor: children.length > 0 ? "pointer" : "default" }}
-                                >
-                                    {children.length > 0
-                                        ? open
-                                            ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                                            : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                                        : <Tag className="h-3.5 w-3.5 text-primary shrink-0" />
-                                    }
-                                    <span className="font-semibold text-sm flex-1 truncate">{parent.name}</span>
-                                    {typeBadge(parent.type)}
-                                    <ActionBtns cat={parent} />
-                                </button>
-
-                                {open && children.length > 0 && (
-                                    <div className="border-t divide-y">
-                                        {children.map((child) => (
-                                            <div key={child.id} className="group flex items-center gap-2 px-3 py-2 bg-muted/20 hover:bg-muted/40 transition-colors">
-                                                <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
-                                                <span className="text-sm text-muted-foreground flex-1 truncate">{child.name}</span>
-                                                <ActionBtns cat={child} />
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </Card>
-                        );
-                    })}
+                    <Reorder.Group as="div" values={localParents} onReorder={handleParentsReorder}
+                        className="contents">
+                        {localParents.map((parent, idx) => (
+                            <SortableCategoryCard
+                                key={parent.id}
+                                parent={parent}
+                                idx={idx}
+                                total={localParents.length}
+                                subcategories={byParent[parent.id] || []}
+                                isExpanded={isExpanded(parent.id)}
+                                onToggle={() => toggle(parent.id)}
+                                typeBadge={typeBadge}
+                                ActionBtns={ActionBtns}
+                                onMoveUp={() => moveParent(idx, -1)}
+                                onMoveDown={() => moveParent(idx, 1)}
+                            />
+                        ))}
+                    </Reorder.Group>
 
                     {/* Orphan children (parent is in another tab) */}
                     {orphans.map((cat) => (
@@ -135,6 +162,7 @@ export default function Categories() {
                             <div className="group flex items-center gap-2 px-3 py-2.5">
                                 <Tag className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                                 <span className="text-sm flex-1 truncate">{cat.name}</span>
+                                {cat.is_favorite && <Star className="h-3 w-3 text-chart-3 fill-chart-3 shrink-0" />}
                                 {typeBadge(cat.type)}
                                 <ActionBtns cat={cat} />
                             </div>
@@ -151,6 +179,53 @@ export default function Categories() {
                 onSubmit={(data) => editing ? updateMut.mutate({ id: editing.id, data }) : createMut.mutate(data)}
             />
         </div>
+    );
+}
+
+function SortableCategoryCard({ parent, idx, total, subcategories, isExpanded, onToggle, typeBadge, ActionBtns, onMoveUp, onMoveDown }) {
+    const dragControls = useDragControls();
+
+    return (
+        <Reorder.Item value={parent} as="div" dragControls={dragControls} dragListener={false}>
+            <Card className="overflow-hidden">
+                <div className="group flex items-center gap-1 px-2 py-2.5 hover:bg-muted/50 transition-colors">
+                    <div
+                        onPointerDown={(e) => { e.preventDefault(); dragControls.start(e); }}
+                        className="cursor-grab active:cursor-grabbing touch-none text-muted-foreground/25 hover:text-muted-foreground/60 transition-colors shrink-0 p-0.5"
+                    >
+                        <GripVertical className="h-3.5 w-3.5" />
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => subcategories.length > 0 && onToggle()}
+                        className="flex items-center gap-2 flex-1 min-w-0 text-left"
+                        style={{ cursor: subcategories.length > 0 ? "pointer" : "default" }}
+                    >
+                        {subcategories.length > 0
+                            ? isExpanded
+                                ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                                : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                            : <Tag className="h-3.5 w-3.5 text-primary shrink-0" />
+                        }
+                        <span className="font-semibold text-sm flex-1 truncate">{parent.name}</span>
+                        {parent.is_favorite && <Star className="h-3 w-3 text-chart-3 fill-chart-3 shrink-0" />}
+                        {typeBadge(parent.type)}
+                    </button>
+                    <ActionBtns cat={parent} idx={idx} total={total} onMoveUp={onMoveUp} onMoveDown={onMoveDown} />
+                </div>
+                {isExpanded && subcategories.length > 0 && (
+                    <div className="border-t divide-y">
+                        {subcategories.map((child) => (
+                            <div key={child.id} className="group flex items-center gap-2 px-3 py-2 bg-muted/20 hover:bg-muted/40 transition-colors">
+                                <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
+                                <span className="text-sm text-muted-foreground flex-1 truncate">{child.name}</span>
+                                <ActionBtns cat={child} />
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </Card>
+        </Reorder.Item>
     );
 }
 

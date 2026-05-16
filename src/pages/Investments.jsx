@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, TrendingUp, TrendingDown, Trash2, Pencil, MoreHorizontal } from "lucide-react";
+import { Plus, TrendingUp, TrendingDown, Trash2, Pencil, MoreHorizontal, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -12,36 +12,102 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Badge } from "@/components/ui/badge";
 import PageHeader from "@/components/shared/PageHeader";
 import StatCard from "@/components/shared/StatCard";
-import { formatCurrency, INVESTMENT_TYPES } from "@/lib/formatters";
+import { formatCurrency, formatCurrencyCode, INVESTMENT_TYPES, TODAY } from "@/lib/formatters";
 import { useCurrency } from "@/lib/currency-context";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
+import { toast } from "sonner";
 
 export default function Investments() {
     const [showForm, setShowForm] = useState(false);
     const [editing, setEditing] = useState(null);
+    const [finalizing, setFinalizing] = useState(null);
     const queryClient = useQueryClient();
+    const { convert, displayCurrency } = useCurrency();
 
     const { data: investments = [] } = useQuery({ queryKey: ["investments"], queryFn: () => base44.entities.Investment.list() });
     const { data: accounts = [] } = useQuery({ queryKey: ["accounts"], queryFn: () => base44.entities.Account.list() });
 
+    const activeInvestments = investments.filter((i) => !i.status || i.status === "activa");
+    const finalizedInvestments = investments.filter((i) => i.status === "finalizada");
+
+    const totalInvested = activeInvestments.reduce((s, i) => s + convert(i.amount_invested || 0, i.currency || "MXN"), 0);
+    const totalCurrent = activeInvestments.reduce((s, i) => s + convert(i.current_value || i.amount_invested || 0, i.currency || "MXN"), 0);
+    const totalReturn = totalCurrent - totalInvested;
+    const returnPct = totalInvested > 0 ? ((totalReturn / totalInvested) * 100).toFixed(1) : 0;
+
     const createMut = useMutation({
-        mutationFn: (d) => base44.entities.Investment.create(d),
-        onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["investments"] }); setShowForm(false); },
+        mutationFn: async (d) => {
+            const inv = await base44.entities.Investment.create({ ...d, status: "activa" });
+            if (d.account_id) {
+                const acc = accounts.find((a) => a.id === d.account_id);
+                await base44.entities.Transaction.create({
+                    type: "expense",
+                    status: "confirmed",
+                    date: d.purchase_date || TODAY,
+                    amount: d.amount_invested,
+                    currency: d.currency || "ARS",
+                    account_id: d.account_id,
+                    account_name: acc?.name || "",
+                    description: `Inversión: ${d.name}`,
+                    category_name: "Inversión",
+                });
+            }
+            return inv;
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ["investments"] });
+            queryClient.invalidateQueries({ queryKey: ["transactions"] });
+            setShowForm(false);
+            toast.success("Inversión creada");
+        },
     });
+
     const updateMut = useMutation({
         mutationFn: ({ id, data }) => base44.entities.Investment.update(id, data),
-        onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["investments"] }); setEditing(null); },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ["investments"] });
+            setEditing(null);
+            toast.success("Inversión actualizada");
+        },
     });
+
+    const finalizeMut = useMutation({
+        mutationFn: async ({ inv, finalAmount, targetAccountId, finalizationDate }) => {
+            await base44.entities.Investment.update(inv.id, {
+                status: "finalizada",
+                final_amount: finalAmount,
+                target_account_id: targetAccountId || null,
+                finalization_date: finalizationDate,
+                current_value: finalAmount,
+            });
+            if (targetAccountId) {
+                const acc = accounts.find((a) => a.id === targetAccountId);
+                await base44.entities.Transaction.create({
+                    type: "income",
+                    status: "confirmed",
+                    date: finalizationDate || TODAY,
+                    amount: finalAmount,
+                    currency: inv.currency || "MXN",
+                    account_id: targetAccountId,
+                    account_name: acc?.name || "",
+                    description: `Inversión finalizada: ${inv.name}`,
+                    category_name: "Inversión",
+                });
+            }
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ["investments"] });
+            queryClient.invalidateQueries({ queryKey: ["transactions"] });
+            setFinalizing(null);
+            toast.success("Inversión finalizada y monto acreditado");
+        },
+    });
+
     const deleteMut = useMutation({
         mutationFn: (id) => base44.entities.Investment.delete(id),
         onSuccess: () => queryClient.invalidateQueries({ queryKey: ["investments"] }),
     });
-
-    const totalInvested = investments.reduce((s, i) => s + (i.amount_invested || 0), 0);
-    const totalCurrent = investments.reduce((s, i) => s + (i.current_value || i.amount_invested || 0), 0);
-    const totalReturn = totalCurrent - totalInvested;
-    const returnPct = totalInvested > 0 ? ((totalReturn / totalInvested) * 100).toFixed(1) : 0;
 
     return (
         <div className="space-y-6">
@@ -50,51 +116,168 @@ export default function Investments() {
             />
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <StatCard title="Total invertido" value={formatCurrency(totalInvested)} icon={TrendingUp} />
-                <StatCard title="Valor actual" value={formatCurrency(totalCurrent)} icon={TrendingUp} />
-                <StatCard title="Rendimiento" value={`${returnPct}%`} subtitle={formatCurrency(totalReturn)}
+                <StatCard title="Total invertido" value={formatCurrencyCode(totalInvested, displayCurrency)} icon={TrendingUp} />
+                <StatCard title="Valor actual" value={formatCurrencyCode(totalCurrent, displayCurrency)} icon={TrendingUp} />
+                <StatCard title="Rendimiento" value={`${returnPct}%`} subtitle={formatCurrencyCode(totalReturn, displayCurrency)}
                     icon={totalReturn >= 0 ? TrendingUp : TrendingDown} trendUp={totalReturn >= 0} />
             </div>
 
+            {/* Active investments */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {investments.map((inv, i) => {
-                    const ret = (inv.current_value || inv.amount_invested) - inv.amount_invested;
-                    const retPct = inv.amount_invested > 0 ? ((ret / inv.amount_invested) * 100).toFixed(1) : 0;
-                    return (
-                        <motion.div key={inv.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
-                            <Card className="hover:shadow-lg transition-shadow">
-                                <CardContent className="p-5 space-y-3">
-                                    <div className="flex items-start justify-between">
-                                        <div>
-                                            <p className="font-semibold">{inv.name}</p>
-                                            <Badge variant="secondary" className="mt-1 text-xs">{INVESTMENT_TYPES[inv.type] || inv.type}</Badge>
-                                        </div>
-                                        <DropdownMenu>
-                                            <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger>
-                                            <DropdownMenuContent align="end">
-                                                <DropdownMenuItem onClick={() => setEditing(inv)}><Pencil className="h-4 w-4 mr-2" />Editar</DropdownMenuItem>
-                                                <DropdownMenuItem className="text-destructive" onClick={() => deleteMut.mutate(inv.id)}><Trash2 className="h-4 w-4 mr-2" />Eliminar</DropdownMenuItem>
-                                            </DropdownMenuContent>
-                                        </DropdownMenu>
-                                    </div>
-                                    <div>
-                                        <p className="text-xl font-bold">{formatCurrency(inv.current_value || inv.amount_invested, inv.currency)}</p>
-                                        <p className="text-xs text-muted-foreground">Invertido: {formatCurrency(inv.amount_invested, inv.currency)}</p>
-                                    </div>
-                                    <div className={cn("text-sm font-medium", ret >= 0 ? "text-primary" : "text-destructive")}>
-                                        {ret >= 0 ? "↑" : "↓"} {retPct}% ({formatCurrency(Math.abs(ret), inv.currency)})
-                                    </div>
-                                    {inv.platform && <p className="text-xs text-muted-foreground">Plataforma: {inv.platform}</p>}
-                                </CardContent>
-                            </Card>
-                        </motion.div>
-                    );
-                })}
+                {activeInvestments.map((inv, i) => (
+                    <InvestmentCard key={inv.id} inv={inv} index={i}
+                        onEdit={() => setEditing(inv)}
+                        onFinalize={() => setFinalizing(inv)}
+                        onDelete={() => deleteMut.mutate(inv.id)}
+                    />
+                ))}
             </div>
 
-            <InvestmentFormDialog open={showForm || !!editing} onClose={() => { setShowForm(false); setEditing(null); }}
-                initial={editing} accounts={accounts} onSubmit={(data) => editing ? updateMut.mutate({ id: editing.id, data }) : createMut.mutate(data)} />
+            {/* Finalized investments */}
+            {finalizedInvestments.length > 0 && (
+                <div className="space-y-2">
+                    <p className="text-sm font-medium text-muted-foreground">Finalizadas</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {finalizedInvestments.map((inv, i) => (
+                            <InvestmentCard key={inv.id} inv={inv} index={i}
+                                onEdit={() => setEditing(inv)}
+                                onDelete={() => deleteMut.mutate(inv.id)}
+                                finalized
+                            />
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            <InvestmentFormDialog
+                open={showForm || !!editing}
+                onClose={() => { setShowForm(false); setEditing(null); }}
+                initial={editing}
+                accounts={accounts}
+                onSubmit={(data) => editing ? updateMut.mutate({ id: editing.id, data }) : createMut.mutate(data)}
+            />
+
+            {finalizing && (
+                <FinalizeDialog
+                    inv={finalizing}
+                    accounts={accounts}
+                    onClose={() => setFinalizing(null)}
+                    onSubmit={(params) => finalizeMut.mutate({ inv: finalizing, ...params })}
+                    isPending={finalizeMut.isPending}
+                />
+            )}
         </div>
+    );
+}
+
+function InvestmentCard({ inv, index, onEdit, onFinalize, onDelete, finalized = false }) {
+    const ret = (inv.current_value || inv.amount_invested) - inv.amount_invested;
+    const retPct = inv.amount_invested > 0 ? ((ret / inv.amount_invested) * 100).toFixed(1) : 0;
+
+    return (
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.05 }}>
+            <Card className={cn("hover:shadow-lg transition-shadow", finalized && "opacity-60")}>
+                <CardContent className="p-5 space-y-3">
+                    <div className="flex items-start justify-between">
+                        <div>
+                            <p className="font-semibold">{inv.name}</p>
+                            <div className="flex gap-1.5 mt-1">
+                                <Badge variant="secondary" className="text-xs">{INVESTMENT_TYPES[inv.type] || inv.type}</Badge>
+                                {finalized && (
+                                    <Badge variant="outline" className="text-xs text-muted-foreground">
+                                        <CheckCircle2 className="h-3 w-3 mr-1" />Finalizada
+                                    </Badge>
+                                )}
+                            </div>
+                        </div>
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-8 w-8"><MoreHorizontal className="h-4 w-4" /></Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={onEdit}><Pencil className="h-4 w-4 mr-2" />Editar</DropdownMenuItem>
+                                {!finalized && onFinalize && (
+                                    <DropdownMenuItem onClick={onFinalize}>
+                                        <CheckCircle2 className="h-4 w-4 mr-2" />Finalizar
+                                    </DropdownMenuItem>
+                                )}
+                                <DropdownMenuItem className="text-destructive" onClick={onDelete}>
+                                    <Trash2 className="h-4 w-4 mr-2" />Eliminar
+                                </DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                    </div>
+                    <div>
+                        <p className="text-xl font-bold">{formatCurrency(inv.current_value || inv.amount_invested, inv.currency)}</p>
+                        <p className="text-xs text-muted-foreground">Invertido: {formatCurrency(inv.amount_invested, inv.currency)}</p>
+                        {finalized && inv.final_amount && (
+                            <p className="text-xs text-muted-foreground">Monto final: {formatCurrency(inv.final_amount, inv.currency)}</p>
+                        )}
+                    </div>
+                    {!finalized && (
+                        <div className={cn("text-sm font-medium", ret >= 0 ? "text-primary" : "text-destructive")}>
+                            {ret >= 0 ? "↑" : "↓"} {retPct}% ({formatCurrency(Math.abs(ret), inv.currency)})
+                        </div>
+                    )}
+                    {inv.platform && <p className="text-xs text-muted-foreground">Plataforma: {inv.platform}</p>}
+                </CardContent>
+            </Card>
+        </motion.div>
+    );
+}
+
+function FinalizeDialog({ inv, accounts, onClose, onSubmit, isPending }) {
+    const [finalAmount, setFinalAmount] = useState(String(inv.current_value || inv.amount_invested || ""));
+    const [targetAccountId, setTargetAccountId] = useState("");
+    const [finalizationDate, setFinalizationDate] = useState(TODAY);
+
+    return (
+        <Dialog open onOpenChange={onClose}>
+            <DialogContent className="max-w-sm">
+                <DialogHeader>
+                    <DialogTitle>Finalizar inversión</DialogTitle>
+                </DialogHeader>
+                <p className="text-sm text-muted-foreground -mt-2">{inv.name}</p>
+                <form onSubmit={(e) => {
+                    e.preventDefault();
+                    onSubmit({
+                        finalAmount: parseFloat(finalAmount) || 0,
+                        targetAccountId: targetAccountId || null,
+                        finalizationDate,
+                    });
+                }} className="space-y-4">
+                    <div>
+                        <Label>Monto final recibido ({inv.currency || "MXN"})</Label>
+                        <Input type="number" step="0.01" value={finalAmount}
+                            onChange={(e) => setFinalAmount(e.target.value)} required />
+                    </div>
+                    <div>
+                        <Label>Acreditar a cuenta</Label>
+                        <p className="text-xs text-muted-foreground mb-1.5">El monto se suma como ingreso a esta cuenta.</p>
+                        <Select value={targetAccountId || "none"} onValueChange={(v) => setTargetAccountId(v === "none" ? "" : v)}>
+                            <SelectTrigger><SelectValue placeholder="Sin cuenta (solo cerrar)" /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="none">Sin cuenta (solo cerrar)</SelectItem>
+                                {[...accounts].sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999)).map((a) => (
+                                    <SelectItem key={a.id} value={a.id}>{a.name} ({a.currency || "MXN"})</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div>
+                        <Label>Fecha de finalización</Label>
+                        <Input type="date" value={finalizationDate}
+                            onChange={(e) => setFinalizationDate(e.target.value)} required />
+                    </div>
+                    <div className="flex gap-3">
+                        <Button type="button" variant="outline" className="flex-1" onClick={onClose}>Cancelar</Button>
+                        <Button type="submit" className="flex-1" disabled={isPending}>
+                            {isPending ? "Guardando..." : "Finalizar"}
+                        </Button>
+                    </div>
+                </form>
+            </DialogContent>
+        </Dialog>
     );
 }
 
@@ -115,7 +298,12 @@ function InvestmentFormDialog({ open, onClose, onSubmit, initial, accounts = [] 
                 <DialogHeader><DialogTitle>{initial ? "Editar" : "Nueva"} inversión</DialogTitle></DialogHeader>
                 <form onSubmit={(e) => {
                     e.preventDefault();
-                    onSubmit({ ...form, amount_invested: parseFloat(form.amount_invested) || 0, current_value: parseFloat(form.current_value) || parseFloat(form.amount_invested) || 0, account_id: form.account_id || null });
+                    onSubmit({
+                        ...form,
+                        amount_invested: parseFloat(form.amount_invested) || 0,
+                        current_value: parseFloat(form.current_value) || parseFloat(form.amount_invested) || 0,
+                        account_id: form.account_id || null,
+                    });
                 }} className="space-y-4">
                     <div><Label>Nombre</Label><Input value={form.name} onChange={(e) => set("name", e.target.value)} required /></div>
                     <div><Label>Tipo</Label>
@@ -139,12 +327,19 @@ function InvestmentFormDialog({ open, onClose, onSubmit, initial, accounts = [] 
                     </div>
                     {accounts.length > 0 && (
                         <div>
-                            <Label>Cuenta de origen <span className="text-muted-foreground font-normal text-xs">(opcional)</span></Label>
+                            <Label>Cuenta de origen</Label>
+                            {!initial && (
+                                <p className="text-xs text-muted-foreground mb-1.5">
+                                    Si seleccionás una cuenta, se registrará automáticamente un egreso por el monto invertido.
+                                </p>
+                            )}
                             <Select value={form.account_id || "none"} onValueChange={(v) => set("account_id", v === "none" ? "" : v)}>
                                 <SelectTrigger><SelectValue placeholder="Sin cuenta asociada" /></SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="none">Sin cuenta asociada</SelectItem>
-                                    {accounts.map((a) => <SelectItem key={a.id} value={a.id}>{a.name} ({a.currency || "MXN"})</SelectItem>)}
+                                    {[...accounts].sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999)).map((a) => (
+                                        <SelectItem key={a.id} value={a.id}>{a.name} ({a.currency || "MXN"})</SelectItem>
+                                    ))}
                                 </SelectContent>
                             </Select>
                         </div>

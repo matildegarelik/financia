@@ -11,16 +11,30 @@ import { cn } from "@/lib/utils";
 export default function BalanceCard({ accounts, transactions, investments, horizon, projectedDate }) {
     const { displayCurrency, convert } = useCurrency();
 
-    // Base account balances (liquid)
+    // Base account balances (liquid) — compute effective = initial + past transactions
     const liquidAccounts = accounts.filter((a) => a.type !== "investment" && a.is_active !== false);
-    const investmentAccounts = accounts.filter((a) => a.type === "investment" && a.is_active !== false);
+
+    function computeEffective(acc) {
+        return transactions
+            .filter((tx) => tx.status !== "projected" && tx.date && tx.date <= TODAY)
+            .reduce((sum, tx) => {
+                if (tx.account_id === acc.id) {
+                    if (tx.type === "income") return sum + (tx.amount || 0);
+                    if (tx.type === "expense") return sum - (tx.amount || 0);
+                    if (tx.type === "transfer") return sum - (tx.amount || 0);
+                }
+                if (tx.to_account_id === acc.id && tx.type === "transfer") return sum + (tx.amount || 0);
+                return sum;
+            }, acc.balance || 0);
+    }
 
     let liquidBalance = liquidAccounts.reduce(
-        (s, a) => s + convert(a.balance || 0, a.currency || "MXN"), 0
+        (s, a) => s + convert(computeEffective(a), a.currency || "MXN"), 0
     );
 
-    // Investment value from Investment entity (current_value)
-    const investedValue = investments.reduce(
+    // Investment value from Investment entity — only active ones
+    const activeInvestments = investments.filter((i) => !i.status || i.status === "activa");
+    const investedValue = activeInvestments.reduce(
         (s, i) => s + convert(i.current_value || i.amount_invested || 0, i.currency || "MXN"), 0
     );
 
