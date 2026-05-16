@@ -1,0 +1,57 @@
+{
+    "name": "Account",
+    "type": "object",
+    "properties": {
+        "name": {
+            "type": "string",
+            "description": "Nombre de la cuenta"
+        },
+        "type": {
+            "type": "string",
+            "enum": [
+                "checking",
+                "savings",
+                "credit_card",
+                "cash",
+                "investment",
+                "other"
+            ],
+            "description": "Tipo de cuenta"
+        },
+        "currency": {
+            "type": "string",
+            "enum": [
+                "MXN",
+                "USD",
+                "EUR",
+                "COP",
+                "ARS",
+                "CLP",
+                "PEN"
+            ],
+            "default": "MXN",
+            "description": "Moneda de la cuenta"
+        },
+        "balance": {
+            "type": "number",
+            "default": 0,
+            "description": "Saldo actual"
+        },
+        "color": {
+            "type": "string",
+            "description": "Color para identificar la cuenta"
+        },
+        "icon": {
+            "type": "string",
+            "description": "Icono de la cuenta"
+        },
+        "is_active": {
+            "type": "boolean",
+            "default": true
+        }
+    },
+    "required": [
+        "name",
+        "type"
+    ]
+}

@@ -1,0 +1,46 @@
+{
+    "name": "ExchangeRate",
+    "type": "object",
+    "properties": {
+        "from_currency": {
+            "type": "string",
+            "enum": [
+                "MXN",
+                "USD",
+                "EUR",
+                "ARS",
+                "COP",
+                "CLP",
+                "PEN"
+            ],
+            "description": "Moneda origen"
+        },
+        "to_currency": {
+            "type": "string",
+            "enum": [
+                "MXN",
+                "USD",
+                "EUR",
+                "ARS",
+                "COP",
+                "CLP",
+                "PEN"
+            ],
+            "description": "Moneda destino"
+        },
+        "rate": {
+            "type": "number",
+            "description": "Tasa de cambio (1 from = rate to)"
+        },
+        "updated_at": {
+            "type": "string",
+            "format": "date",
+            "description": "Fecha de \u00faltima actualizaci\u00f3n"
+        }
+    },
+    "required": [
+        "from_currency",
+        "to_currency",
+        "rate"
+    ]
+}

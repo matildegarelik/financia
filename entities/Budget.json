@@ -1,0 +1,44 @@
+{
+    "name": "Budget",
+    "type": "object",
+    "properties": {
+        "category_id": {
+            "type": "string",
+            "description": "ID de la categor\u00eda"
+        },
+        "category_name": {
+            "type": "string",
+            "description": "Nombre de la categor\u00eda"
+        },
+        "amount": {
+            "type": "number",
+            "description": "Monto presupuestado"
+        },
+        "spent": {
+            "type": "number",
+            "default": 0,
+            "description": "Monto gastado"
+        },
+        "period": {
+            "type": "string",
+            "enum": [
+                "weekly",
+                "monthly",
+                "yearly"
+            ],
+            "default": "monthly"
+        },
+        "month": {
+            "type": "string",
+            "description": "Mes del presupuesto (YYYY-MM)"
+        },
+        "color": {
+            "type": "string"
+        }
+    },
+    "required": [
+        "category_name",
+        "amount",
+        "period"
+    ]
+}

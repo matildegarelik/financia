@@ -1,0 +1,61 @@
+{
+    "name": "Investment",
+    "type": "object",
+    "properties": {
+        "name": {
+            "type": "string",
+            "description": "Nombre de la inversi\u00f3n"
+        },
+        "type": {
+            "type": "string",
+            "enum": [
+                "stocks",
+                "bonds",
+                "crypto",
+                "real_estate",
+                "mutual_fund",
+                "etf",
+                "cetes",
+                "other"
+            ],
+            "description": "Tipo de inversi\u00f3n"
+        },
+        "platform": {
+            "type": "string",
+            "description": "Plataforma o broker"
+        },
+        "amount_invested": {
+            "type": "number",
+            "description": "Monto invertido"
+        },
+        "current_value": {
+            "type": "number",
+            "description": "Valor actual"
+        },
+        "currency": {
+            "type": "string",
+            "enum": [
+                "MXN",
+                "USD",
+                "EUR"
+            ],
+            "default": "MXN"
+        },
+        "purchase_date": {
+            "type": "string",
+            "format": "date"
+        },
+        "notes": {
+            "type": "string"
+        },
+        "is_active": {
+            "type": "boolean",
+            "default": true
+        }
+    },
+    "required": [
+        "name",
+        "type",
+        "amount_invested"
+    ]
+}

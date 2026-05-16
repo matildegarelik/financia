@@ -1,0 +1,243 @@
+import React, { useState, useEffect } from "react";
+import { base44 } from "@/api/base44Client";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Plus, Trash2, Pencil, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Badge } from "@/components/ui/badge";
+import PageHeader from "@/components/shared/PageHeader";
+import { formatCurrency } from "@/lib/formatters";
+import { cn } from "@/lib/utils";
+import { motion } from "framer-motion";
+import { format, startOfMonth, endOfMonth, addMonths, subMonths } from "date-fns";
+import { es } from "date-fns/locale";
+import { toast } from "sonner";
+
+function toMonthKey(date) {
+    return format(date, "yyyy-MM");
+}
+
+export default function Budgets() {
+    const [showForm, setShowForm] = useState(false);
+    const [editing, setEditing] = useState(null);
+    const [currentMonth, setCurrentMonth] = useState(new Date());
+    const queryClient = useQueryClient();
+
+    const monthKey = toMonthKey(currentMonth);
+    const monthStart = format(startOfMonth(currentMonth), "yyyy-MM-dd");
+    const monthEnd = format(endOfMonth(currentMonth), "yyyy-MM-dd");
+
+    const { data: allBudgets = [] } = useQuery({ queryKey: ["budgets"], queryFn: () => base44.entities.Budget.list() });
+    const { data: transactions = [] } = useQuery({
+        queryKey: ["transactions"],
+        queryFn: () => base44.entities.Transaction.list(),
+    });
+    const { data: categories = [] } = useQuery({ queryKey: ["categories"], queryFn: () => base44.entities.Category.list() });
+
+    // Budgets for current month (month matches OR budget has no month = template)
+    const budgets = allBudgets.filter((b) => b.month === monthKey);
+
+    // Calculate spent from real transactions for this month
+    const getBudgetSpent = (budget) => {
+        return transactions
+            .filter((tx) => {
+                if (tx.type !== "expense") return false;
+                if (!tx.date) return false;
+                if (tx.date < monthStart || tx.date > monthEnd) return false;
+                if (tx.status === "projected") return false;
+                // Match by category
+                if (budget.category_id && tx.category_id === budget.category_id) return true;
+                if (!budget.category_id && budget.category_name && tx.category_name === budget.category_name) return true;
+                return false;
+            })
+            .reduce((s, tx) => s + (tx.amount || 0), 0);
+    };
+
+    const createMut = useMutation({
+        mutationFn: (d) => base44.entities.Budget.create(d),
+        onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["budgets"] }); setShowForm(false); },
+    });
+    const updateMut = useMutation({
+        mutationFn: ({ id, data }) => base44.entities.Budget.update(id, data),
+        onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["budgets"] }); setEditing(null); },
+    });
+    const deleteMut = useMutation({
+        mutationFn: (id) => base44.entities.Budget.delete(id),
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: ["budgets"] }),
+    });
+
+    // Copy last month budgets to current month
+    const prevMonthKey = toMonthKey(subMonths(currentMonth, 1));
+    const prevBudgets = allBudgets.filter((b) => b.month === prevMonthKey);
+
+    const copyFromLastMonth = async () => {
+        if (prevBudgets.length === 0) { toast.error("No hay presupuestos del mes anterior"); return; }
+        for (const b of prevBudgets) {
+            await base44.entities.Budget.create({ ...b, id: undefined, month: monthKey, spent: 0 });
+        }
+        queryClient.invalidateQueries({ queryKey: ["budgets"] });
+        toast.success(`${prevBudgets.length} presupuestos copiados`);
+    };
+
+    const totalBudget = budgets.reduce((s, b) => s + (b.amount || 0), 0);
+    const totalSpent = budgets.reduce((s, b) => s + getBudgetSpent(b), 0);
+    const isCurrentMonth = monthKey === toMonthKey(new Date());
+
+    return (
+        <div className="space-y-5">
+            <PageHeader
+                title="Presupuestos"
+                action={
+                    <div className="flex gap-2">
+                        {budgets.length === 0 && prevBudgets.length > 0 && (
+                            <Button variant="outline" size="sm" onClick={copyFromLastMonth}>
+                                <RefreshCw className="h-4 w-4 mr-1.5" />Copiar del mes anterior
+                            </Button>
+                        )}
+                        <Button size="sm" onClick={() => setShowForm(true)}><Plus className="h-4 w-4 mr-1.5" />Nuevo</Button>
+                    </div>
+                }
+            />
+
+            {/* Month navigator */}
+            <div className="flex items-center justify-between bg-card border rounded-xl px-4 py-3">
+                <Button variant="ghost" size="icon" onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}>
+                    <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <div className="text-center">
+                    <p className="font-semibold capitalize">{format(currentMonth, "MMMM yyyy", { locale: es })}</p>
+                    {isCurrentMonth && <Badge variant="secondary" className="text-xs mt-0.5">Mes actual</Badge>}
+                </div>
+                <Button variant="ghost" size="icon" onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}>
+                    <ChevronRight className="h-4 w-4" />
+                </Button>
+            </div>
+
+            {/* Summary bar */}
+            {budgets.length > 0 && (
+                <Card>
+                    <CardContent className="p-4">
+                        <div className="flex justify-between text-sm mb-2">
+                            <span className="text-muted-foreground">Total gastado</span>
+                            <span className="font-medium">
+                                {formatCurrency(totalSpent)} / {formatCurrency(totalBudget)}
+                            </span>
+                        </div>
+                        <Progress
+                            value={totalBudget > 0 ? Math.min((totalSpent / totalBudget) * 100, 100) : 0}
+                            className={cn(totalSpent > totalBudget ? "[&>div]:bg-destructive" : "[&>div]:bg-primary")}
+                        />
+                        <p className={cn("text-xs mt-1.5 text-right font-medium", totalSpent > totalBudget ? "text-destructive" : "text-muted-foreground")}>
+                            {totalSpent > totalBudget
+                                ? `Excedido ${formatCurrency(totalSpent - totalBudget)}`
+                                : `${formatCurrency(totalBudget - totalSpent)} restante`}
+                        </p>
+                    </CardContent>
+                </Card>
+            )}
+
+            {budgets.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                    <p className="text-lg font-medium mb-1">Sin presupuestos este mes</p>
+                    <p className="text-sm mb-4">
+                        {prevBudgets.length > 0 ? "Puedes copiar los del mes anterior o crear nuevos." : "Crea tu primer presupuesto."}
+                    </p>
+                    <div className="flex gap-2 justify-center">
+                        {prevBudgets.length > 0 && (
+                            <Button variant="outline" onClick={copyFromLastMonth}>
+                                <RefreshCw className="h-4 w-4 mr-1.5" />Copiar del mes anterior
+                            </Button>
+                        )}
+                        <Button onClick={() => setShowForm(true)}><Plus className="h-4 w-4 mr-1.5" />Nuevo presupuesto</Button>
+                    </div>
+                </div>
+            ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {budgets.map((b, i) => {
+                        const spent = getBudgetSpent(b);
+                        const pct = b.amount > 0 ? Math.min((spent / b.amount) * 100, 100) : 0;
+                        const over = spent > b.amount;
+                        const remaining = b.amount - spent;
+                        return (
+                            <motion.div key={b.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
+                                <Card className="hover:shadow-lg transition-shadow">
+                                    <CardContent className="p-5 space-y-3">
+                                        <div className="flex items-center justify-between">
+                                            <p className="font-semibold">{b.category_name}</p>
+                                            <div className="flex gap-1">
+                                                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditing(b)}><Pencil className="h-3.5 w-3.5" /></Button>
+                                                <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => deleteMut.mutate(b.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                                            </div>
+                                        </div>
+                                        <Progress value={pct} className={cn(over ? "[&>div]:bg-destructive" : pct > 80 ? "[&>div]:bg-yellow-500" : "[&>div]:bg-primary")} />
+                                        <div className="flex justify-between text-sm">
+                                            <span className="text-muted-foreground">{formatCurrency(spent)} gastado</span>
+                                            <span className={cn("font-medium", over ? "text-destructive" : "text-primary")}>
+                                                {over ? `Excedido ${formatCurrency(Math.abs(remaining))}` : `${formatCurrency(remaining)} restante`}
+                                            </span>
+                                        </div>
+                                        <p className="text-xs text-muted-foreground text-right">{pct.toFixed(0)}% de {formatCurrency(b.amount)}</p>
+                                    </CardContent>
+                                </Card>
+                            </motion.div>
+                        );
+                    })}
+                </div>
+            )}
+
+            <BudgetFormDialog
+                open={showForm || !!editing}
+                onClose={() => { setShowForm(false); setEditing(null); }}
+                initial={editing}
+                categories={categories.filter((c) => c.type === "expense")}
+                monthKey={monthKey}
+                onSubmit={(data) => editing ? updateMut.mutate({ id: editing.id, data }) : createMut.mutate({ ...data, month: monthKey })}
+            />
+        </div>
+    );
+}
+
+function BudgetFormDialog({ open, onClose, onSubmit, initial, categories, monthKey }) {
+    const [form, setForm] = useState({ category_name: "", amount: "", period: "monthly", spent: 0 });
+    useEffect(() => {
+        if (initial) setForm({ ...initial, amount: String(initial.amount || "") });
+        else setForm({ category_name: "", amount: "", period: "monthly", spent: 0 });
+    }, [initial, open]);
+    const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+
+    const handleCat = (id) => {
+        const cat = categories.find((c) => c.id === id);
+        set("category_id", id);
+        set("category_name", cat?.name || "");
+    };
+
+    return (
+        <Dialog open={open} onOpenChange={onClose}>
+            <DialogContent className="max-w-sm">
+                <DialogHeader><DialogTitle>{initial ? "Editar" : "Nuevo"} presupuesto</DialogTitle></DialogHeader>
+                <form onSubmit={(e) => { e.preventDefault(); onSubmit({ ...form, amount: parseFloat(form.amount) || 0 }); }} className="space-y-4">
+                    <div><Label>Categoría</Label>
+                        {categories.length > 0 ? (
+                            <Select value={form.category_id || ""} onValueChange={handleCat}>
+                                <SelectTrigger><SelectValue placeholder="Seleccionar" /></SelectTrigger>
+                                <SelectContent>{categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
+                            </Select>
+                        ) : (
+                            <Input value={form.category_name} onChange={(e) => set("category_name", e.target.value)} placeholder="Nombre de categoría" />
+                        )}
+                    </div>
+                    <div><Label>Monto presupuestado</Label><Input type="number" step="0.01" value={form.amount} onChange={(e) => set("amount", e.target.value)} required /></div>
+                    <div className="flex gap-3">
+                        <Button type="button" variant="outline" className="flex-1" onClick={onClose}>Cancelar</Button>
+                        <Button type="submit" className="flex-1">{initial ? "Guardar" : "Crear"}</Button>
+                    </div>
+                </form>
+            </DialogContent>
+        </Dialog>
+    );
+}
