@@ -1,282 +1,138 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useEffect } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Target, CloudLightning, Trash2 } from "lucide-react";
+import { Plus, TrendingUp, TrendingDown, Trash2, Pencil, MoreHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import PageHeader from "@/components/shared/PageHeader";
-import TransactionFormProjected from "@/components/transactions/TransactionFormProjected";
-import { formatCurrency, formatDate, getCurrentMonth, getMonthLabel } from "@/lib/formatters";
+import StatCard from "@/components/shared/StatCard";
+import { formatCurrency, INVESTMENT_TYPES } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
-import { useCurrency } from "@/lib/currency-context";
-import { toast } from "sonner";
+import { motion } from "framer-motion";
 
-function addMonths(yyyymm, n) {
-    const [y, m] = yyyymm.split("-").map(Number);
-    const d = new Date(y, m - 1 + n, 1);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-}
-
-function txMonth(tx) {
-    return tx.date ? tx.date.slice(0, 7) : null;
-}
-
-export default function Projected() {
+export default function Investments() {
     const [showForm, setShowForm] = useState(false);
     const [editing, setEditing] = useState(null);
-    const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth());
     const queryClient = useQueryClient();
-    const { convert, displayCurrency } = useCurrency();
 
-    const { data: transactions = [], isLoading } = useQuery({
-        queryKey: ["transactions"],
-        queryFn: () => base44.entities.Transaction.list("-date", 500),
-    });
-    const { data: accounts = [] } = useQuery({ queryKey: ["accounts"], queryFn: () => base44.entities.Account.list() });
-    const { data: categories = [] } = useQuery({ queryKey: ["categories"], queryFn: () => base44.entities.Category.list() });
+    const { data: investments = [] } = useQuery({ queryKey: ["investments"], queryFn: () => base44.entities.Investment.list() });
 
     const createMut = useMutation({
-        mutationFn: (data) => base44.entities.Transaction.create({ ...data, status: "projected" }),
-        onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["transactions"] }); setShowForm(false); toast.success("Proyección creada"); },
+        mutationFn: (d) => base44.entities.Investment.create(d),
+        onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["investments"] }); setShowForm(false); },
     });
     const updateMut = useMutation({
-        mutationFn: ({ id, data }) => base44.entities.Transaction.update(id, data),
-        onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["transactions"] }); setEditing(null); },
+        mutationFn: ({ id, data }) => base44.entities.Investment.update(id, data),
+        onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["investments"] }); setEditing(null); },
     });
     const deleteMut = useMutation({
-        mutationFn: (id) => base44.entities.Transaction.delete(id),
-        onSuccess: () => queryClient.invalidateQueries({ queryKey: ["transactions"] }),
+        mutationFn: (id) => base44.entities.Investment.delete(id),
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: ["investments"] }),
     });
 
-    const currentMonth = getCurrentMonth();
-    const isPastOrCurrent = selectedMonth <= currentMonth;
-    const isFuture = selectedMonth > currentMonth;
-
-    // Transacciones del mes seleccionado
-    const monthData = useMemo(() => {
-        const projected = transactions.filter((t) => t.status === "projected" && txMonth(t) === selectedMonth);
-        const real = transactions.filter((t) => t.status !== "projected" && txMonth(t) === selectedMonth);
-
-        const projIncome = projected.filter((t) => t.type === "income").reduce((s, t) => s + convert(t.amount || 0, t.currency || "MXN"), 0);
-        const projExpense = projected.filter((t) => t.type === "expense").reduce((s, t) => s + convert(t.amount || 0, t.currency || "MXN"), 0);
-        const projSavings = projIncome - projExpense;
-
-        const realIncome = real.filter((t) => t.type === "income").reduce((s, t) => s + convert(t.amount || 0, t.currency || "MXN"), 0);
-        const realExpense = real.filter((t) => t.type === "expense").reduce((s, t) => s + convert(t.amount || 0, t.currency || "MXN"), 0);
-        const realSavings = realIncome - realExpense;
-
-        return { projected, real, projIncome, projExpense, projSavings, realIncome, realExpense, realSavings };
-    }, [transactions, selectedMonth, convert]);
-
-    const { projected, projIncome, projExpense, projSavings, realIncome, realExpense, realSavings } = monthData;
-
-    const diffIncome = realIncome - projIncome;
-    const diffExpense = realExpense - projExpense;
-    const diffSavings = realSavings - projSavings;
+    const totalInvested = investments.reduce((s, i) => s + (i.amount_invested || 0), 0);
+    const totalCurrent = investments.reduce((s, i) => s + (i.current_value || i.amount_invested || 0), 0);
+    const totalReturn = totalCurrent - totalInvested;
+    const returnPct = totalInvested > 0 ? ((totalReturn / totalInvested) * 100).toFixed(1) : 0;
 
     return (
-        <div className="space-y-5">
-            <PageHeader
-                title="Proyectado"
-                description="Seguimiento de metas vs realidad por mes"
-                action={
-                    <Button size="sm" onClick={() => setShowForm(true)}>
-                        <Plus className="h-4 w-4 mr-1.5" />Nueva proyección
-                    </Button>
-                }
+        <div className="space-y-6">
+            <PageHeader title="Inversiones" description="Gestiona tu portafolio de inversiones"
+                action={<Button onClick={() => setShowForm(true)}><Plus className="h-4 w-4 mr-2" />Nueva inversión</Button>}
             />
 
-            {/* Navegación de mes */}
-            <div className="flex items-center justify-between">
-                <Button variant="ghost" size="icon" onClick={() => setSelectedMonth(addMonths(selectedMonth, -1))}>
-                    <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <div className="text-center">
-                    <p className="font-semibold capitalize">{getMonthLabel(selectedMonth)}</p>
-                    {selectedMonth === currentMonth && <Badge variant="secondary" className="text-xs mt-0.5">Mes actual</Badge>}
-                    {isFuture && <Badge variant="outline" className="text-xs mt-0.5">Futuro</Badge>}
-                    {selectedMonth < currentMonth && <Badge variant="outline" className="text-xs mt-0.5 text-muted-foreground">Pasado</Badge>}
-                </div>
-                <Button variant="ghost" size="icon" onClick={() => setSelectedMonth(addMonths(selectedMonth, 1))}>
-                    <ChevronRight className="h-4 w-4" />
-                </Button>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <StatCard title="Total invertido" value={formatCurrency(totalInvested)} icon={TrendingUp} />
+                <StatCard title="Valor actual" value={formatCurrency(totalCurrent)} icon={TrendingUp} />
+                <StatCard title="Rendimiento" value={`${returnPct}%`} subtitle={formatCurrency(totalReturn)}
+                    icon={totalReturn >= 0 ? TrendingUp : TrendingDown} trendUp={totalReturn >= 0} />
             </div>
 
-            {/* Tarjetas de resumen */}
-            {isFuture ? (
-                // Vista futura: solo proyectado
-                <div className="grid grid-cols-3 gap-3">
-                    <Card>
-                        <CardContent className="p-4">
-                            <p className="text-xs text-muted-foreground mb-1">Ingresos proyectados</p>
-                            <p className="text-lg font-bold text-primary">{formatCurrency(projIncome, displayCurrency)}</p>
-                        </CardContent>
-                    </Card>
-                    <Card>
-                        <CardContent className="p-4">
-                            <p className="text-xs text-muted-foreground mb-1">Gastos proyectados</p>
-                            <p className="text-lg font-bold text-destructive">{formatCurrency(projExpense, displayCurrency)}</p>
-                        </CardContent>
-                    </Card>
-                    <Card>
-                        <CardContent className="p-4">
-                            <p className="text-xs text-muted-foreground mb-1">Ahorro esperado</p>
-                            <p className={cn("text-lg font-bold", projSavings >= 0 ? "text-primary" : "text-destructive")}>
-                                {formatCurrency(projSavings, displayCurrency)}
-                            </p>
-                        </CardContent>
-                    </Card>
-                </div>
-            ) : (
-                // Vista actual/pasada: proyectado vs real con diferencias
-                <div className="space-y-3">
-                    {/* Header de comparativa */}
-                    <div className="grid grid-cols-3 gap-1 text-xs text-muted-foreground px-1">
-                        <span></span>
-                        <span className="text-center font-medium">Proyectado</span>
-                        <span className="text-center font-medium">Real</span>
-                    </div>
-
-                    {/* Ingresos */}
-                    <Card>
-                        <CardContent className="p-4">
-                            <div className="grid grid-cols-3 gap-2 items-center">
-                                <div className="flex items-center gap-1.5">
-                                    <TrendingUp className="h-4 w-4 text-primary shrink-0" />
-                                    <span className="text-sm font-medium">Ingresos</span>
-                                </div>
-                                <p className="text-center text-sm font-semibold text-muted-foreground">{formatCurrency(projIncome, displayCurrency)}</p>
-                                <div className="text-center">
-                                    <p className="text-sm font-semibold text-primary">{formatCurrency(realIncome, displayCurrency)}</p>
-                                    {diffIncome !== 0 && (
-                                        <p className={cn("text-xs", diffIncome >= 0 ? "text-primary" : "text-destructive")}>
-                                            {diffIncome >= 0 ? "+" : ""}{formatCurrency(diffIncome, displayCurrency)}
-                                        </p>
-                                    )}
-                                </div>
-                            </div>
-                        </CardContent>
-                    </Card>
-
-                    {/* Gastos */}
-                    <Card>
-                        <CardContent className="p-4">
-                            <div className="grid grid-cols-3 gap-2 items-center">
-                                <div className="flex items-center gap-1.5">
-                                    <TrendingDown className="h-4 w-4 text-destructive shrink-0" />
-                                    <span className="text-sm font-medium">Gastos</span>
-                                </div>
-                                <p className="text-center text-sm font-semibold text-muted-foreground">{formatCurrency(projExpense, displayCurrency)}</p>
-                                <div className="text-center">
-                                    <p className="text-sm font-semibold text-destructive">{formatCurrency(realExpense, displayCurrency)}</p>
-                                    {diffExpense !== 0 && (
-                                        <p className={cn("text-xs", diffExpense <= 0 ? "text-primary" : "text-destructive")}>
-                                            {diffExpense >= 0 ? "+" : ""}{formatCurrency(diffExpense, displayCurrency)}
-                                        </p>
-                                    )}
-                                </div>
-                            </div>
-                        </CardContent>
-                    </Card>
-
-                    {/* Ahorro */}
-                    <Card className={cn("border-2", diffSavings >= 0 ? "border-primary/30" : "border-destructive/30")}>
-                        <CardContent className="p-4">
-                            <div className="grid grid-cols-3 gap-2 items-center">
-                                <div className="flex items-center gap-1.5">
-                                    <Target className="h-4 w-4 text-chart-3 shrink-0" />
-                                    <span className="text-sm font-medium">Ahorro</span>
-                                </div>
-                                <p className="text-center text-sm font-semibold text-muted-foreground">{formatCurrency(projSavings, displayCurrency)}</p>
-                                <div className="text-center">
-                                    <p className={cn("text-sm font-bold", realSavings >= 0 ? "text-primary" : "text-destructive")}>
-                                        {formatCurrency(realSavings, displayCurrency)}
-                                    </p>
-                                    {diffSavings !== 0 && (
-                                        <p className={cn("text-xs font-medium", diffSavings >= 0 ? "text-primary" : "text-destructive")}>
-                                            {diffSavings >= 0 ? "+" : ""}{formatCurrency(diffSavings, displayCurrency)} vs meta
-                                        </p>
-                                    )}
-                                </div>
-                            </div>
-                        </CardContent>
-                    </Card>
-                </div>
-            )}
-
-            {/* Lista de proyecciones del mes */}
-            <div>
-                <h3 className="text-sm font-semibold text-muted-foreground mb-2">
-                    Proyecciones de {getMonthLabel(selectedMonth)}
-                </h3>
-                {isLoading ? (
-                    <p className="text-muted-foreground text-sm">Cargando...</p>
-                ) : projected.length === 0 ? (
-                    <Card>
-                        <CardContent className="py-10 text-center text-muted-foreground text-sm">
-                            <CloudLightning className="h-7 w-7 mx-auto mb-2 opacity-30" />
-                            No hay proyecciones para este mes.
-                        </CardContent>
-                    </Card>
-                ) : (
-                    <Card className="overflow-hidden">
-                        <div className="divide-y divide-border">
-                            {projected.map((tx) => (
-                                <div
-                                    key={tx.id}
-                                    className="flex items-center gap-3 p-3 hover:bg-muted/20 cursor-pointer"
-                                    onClick={() => setEditing(tx)}
-                                >
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-2 flex-wrap">
-                                            <p className="text-sm font-medium truncate">{tx.description || (tx.type === "income" ? "Ingreso" : "Gasto")}</p>
-                                            {tx.probability != null && (
-                                                <Badge variant="outline" className="text-xs">{tx.probability}%</Badge>
-                                            )}
-                                            {tx.project_name && <Badge variant="secondary" className="text-xs">{tx.project_name}</Badge>}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {investments.map((inv, i) => {
+                    const ret = (inv.current_value || inv.amount_invested) - inv.amount_invested;
+                    const retPct = inv.amount_invested > 0 ? ((ret / inv.amount_invested) * 100).toFixed(1) : 0;
+                    return (
+                        <motion.div key={inv.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
+                            <Card className="hover:shadow-lg transition-shadow">
+                                <CardContent className="p-5 space-y-3">
+                                    <div className="flex items-start justify-between">
+                                        <div>
+                                            <p className="font-semibold">{inv.name}</p>
+                                            <Badge variant="secondary" className="mt-1 text-xs">{INVESTMENT_TYPES[inv.type] || inv.type}</Badge>
                                         </div>
-                                        <p className="text-xs text-muted-foreground">
-                                            {tx.category_name && `${tx.category_name} · `}{formatDate(tx.date)}
-                                            {tx.client_name && ` · ${tx.client_name}`}
-                                        </p>
+                                        <DropdownMenu>
+                                            <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger>
+                                            <DropdownMenuContent align="end">
+                                                <DropdownMenuItem onClick={() => setEditing(inv)}><Pencil className="h-4 w-4 mr-2" />Editar</DropdownMenuItem>
+                                                <DropdownMenuItem className="text-destructive" onClick={() => deleteMut.mutate(inv.id)}><Trash2 className="h-4 w-4 mr-2" />Eliminar</DropdownMenuItem>
+                                            </DropdownMenuContent>
+                                        </DropdownMenu>
                                     </div>
-                                    <div className="flex items-center gap-2 shrink-0">
-                                        <p className={cn("text-sm font-semibold", tx.type === "income" ? "text-primary" : "text-destructive")}>
-                                            {tx.type === "income" ? "+" : "-"}{formatCurrency(tx.amount, tx.currency || "MXN")}
-                                        </p>
-                                        <Button
-                                            variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                                            onClick={(e) => { e.stopPropagation(); deleteMut.mutate(tx.id); }}
-                                        >
-                                            <Trash2 className="h-3.5 w-3.5" />
-                                        </Button>
+                                    <div>
+                                        <p className="text-xl font-bold">{formatCurrency(inv.current_value || inv.amount_invested, inv.currency)}</p>
+                                        <p className="text-xs text-muted-foreground">Invertido: {formatCurrency(inv.amount_invested, inv.currency)}</p>
                                     </div>
-                                </div>
-                            ))}
-                        </div>
-                    </Card>
-                )}
+                                    <div className={cn("text-sm font-medium", ret >= 0 ? "text-primary" : "text-destructive")}>
+                                        {ret >= 0 ? "↑" : "↓"} {retPct}% ({formatCurrency(Math.abs(ret), inv.currency)})
+                                    </div>
+                                    {inv.platform && <p className="text-xs text-muted-foreground">Plataforma: {inv.platform}</p>}
+                                </CardContent>
+                            </Card>
+                        </motion.div>
+                    );
+                })}
             </div>
 
-            <TransactionFormProjected
-                open={showForm}
-                onClose={() => setShowForm(false)}
-                accounts={accounts}
-                categories={categories}
-                onSubmit={(d) => createMut.mutate(d)}
-            />
-
-            {editing && (
-                <TransactionFormProjected
-                    open={!!editing}
-                    onClose={() => setEditing(null)}
-                    accounts={accounts}
-                    categories={categories}
-                    initial={editing}
-                    onSubmit={(d) => updateMut.mutate({ id: editing.id, data: d })}
-                />
-            )}
+            <InvestmentFormDialog open={showForm || !!editing} onClose={() => { setShowForm(false); setEditing(null); }}
+                initial={editing} onSubmit={(data) => editing ? updateMut.mutate({ id: editing.id, data }) : createMut.mutate(data)} />
         </div>
+    );
+}
+
+function InvestmentFormDialog({ open, onClose, onSubmit, initial }) {
+    const [form, setForm] = useState(initial || { name: "", type: "stocks", amount_invested: "", current_value: "", currency: "MXN", platform: "", purchase_date: "", notes: "" });
+    React.useEffect(() => { if (initial) setForm(initial); else setForm({ name: "", type: "stocks", amount_invested: "", current_value: "", currency: "MXN", platform: "", purchase_date: "", notes: "" }); }, [initial]);
+    const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+
+    return (
+        <Dialog open={open} onOpenChange={onClose}>
+            <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+                <DialogHeader><DialogTitle>{initial ? "Editar" : "Nueva"} inversión</DialogTitle></DialogHeader>
+                <form onSubmit={(e) => { e.preventDefault(); onSubmit({ ...form, amount_invested: parseFloat(form.amount_invested) || 0, current_value: parseFloat(form.current_value) || parseFloat(form.amount_invested) || 0 }); }} className="space-y-4">
+                    <div><Label>Nombre</Label><Input value={form.name} onChange={(e) => set("name", e.target.value)} required /></div>
+                    <div><Label>Tipo</Label>
+                        <Select value={form.type} onValueChange={(v) => set("type", v)}>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>{Object.entries(INVESTMENT_TYPES).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
+                        </Select>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div><Label>Monto invertido</Label><Input type="number" step="0.01" value={form.amount_invested} onChange={(e) => set("amount_invested", e.target.value)} required /></div>
+                        <div><Label>Valor actual</Label><Input type="number" step="0.01" value={form.current_value} onChange={(e) => set("current_value", e.target.value)} /></div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div><Label>Moneda</Label>
+                            <Select value={form.currency} onValueChange={(v) => set("currency", v)}>
+                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                <SelectContent>{["MXN", "USD", "EUR"].map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                            </Select>
+                        </div>
+                        <div><Label>Fecha de compra</Label><Input type="date" value={form.purchase_date} onChange={(e) => set("purchase_date", e.target.value)} /></div>
+                    </div>
+                    <div><Label>Plataforma</Label><Input value={form.platform} onChange={(e) => set("platform", e.target.value)} placeholder="GBM, Bitso, etc." /></div>
+                    <div className="flex gap-3">
+                        <Button type="button" variant="outline" className="flex-1" onClick={onClose}>Cancelar</Button>
+                        <Button type="submit" className="flex-1">{initial ? "Guardar" : "Crear"}</Button>
+                    </div>
+                </form>
+            </DialogContent>
+        </Dialog>
     );
 }

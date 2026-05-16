@@ -75,22 +75,24 @@ export default function Settings() {
 
     const fetchRates = async () => {
         setLoadingRates(true);
-        const pairs = currencyPairs.map(([f, t]) => `1 ${f} to ${t}`).join(", ");
-        const schema = { type: "object", properties: {} };
-        currencyPairs.forEach(([f, t]) => { schema.properties[`${f}_${t}`] = { type: "number" }; });
         try {
-            const res = await base44.integrations.Core.InvokeLLM({
-                prompt: `Get current real market exchange rates for: ${pairs}. Return exact numeric values (e.g. 0.000706 for 1 ARS = 0.000706 USD). Use today's market rates.`,
-                add_context_from_internet: true,
-                response_json_schema: schema,
-            });
             const newMap = { ...rateValues };
-            Object.entries(res).forEach(([key, val]) => {
-                newMap[key] = { ...(newMap[key] || {}), rate: String(val) };
-            });
+            const fromCurrencies = [...new Set(currencyPairs.map(([from]) => from))];
+            for (const from of fromCurrencies) {
+                const res = await fetch(
+                    `https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/${from.toLowerCase()}.json`
+                );
+                const data = await res.json();
+                const rates = data[from.toLowerCase()];
+                if (!rates) continue;
+                for (const [f, to] of currencyPairs.filter(([f]) => f === from)) {
+                    const rate = rates[to.toLowerCase()];
+                    if (rate) newMap[`${from}_${to}`] = { ...(newMap[`${from}_${to}`] || {}), rate: String(rate) };
+                }
+            }
             setRateValues(newMap);
             toast.success("Tasas obtenidas. Guardá los cambios.");
-        } catch (e) {
+        } catch {
             toast.error("No se pudieron obtener las tasas automáticamente");
         }
         setLoadingRates(false);
@@ -236,7 +238,7 @@ export default function Settings() {
                     <div className="flex items-center justify-between">
                         <div>
                             <CardTitle className="text-base">Tipos de cambio</CardTitle>
-                            <p className="text-xs text-muted-foreground mt-0.5">Cuánto equivale 1 unidad de la moneda origen. Las tasas se obtienen de internet vía IA.</p>
+                            <p className="text-xs text-muted-foreground mt-0.5">Cuánto equivale 1 unidad de la moneda origen. Las tasas se obtienen automáticamente de exchangerate-api.</p>
                         </div>
                         <Button variant="outline" size="sm" onClick={fetchRates} disabled={loadingRates || currencyPairs.length === 0}>
                             {loadingRates ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1" />}

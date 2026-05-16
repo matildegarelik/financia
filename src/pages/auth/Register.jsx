@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
-import { base44 } from "@/api/base44Client";
+import { supabase } from "@/api/supabaseClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,7 +23,8 @@ export default function Register() {
         if (password !== confirmPassword) { setError("Las contraseñas no coinciden"); return; }
         setLoading(true);
         try {
-            await base44.auth.register({ email, password });
+            const { error: err } = await supabase.auth.signUp({ email, password });
+            if (err) throw err;
             setStep("otp");
         } catch (err) {
             setError(err.message || "Error al registrarse");
@@ -35,15 +36,25 @@ export default function Register() {
         setError("");
         setLoading(true);
         try {
-            const res = await base44.auth.verifyOtp({ email, otpCode: otp });
-            base44.auth.setToken(res.access_token);
+            const { error: err } = await supabase.auth.verifyOtp({ email, token: otp, type: 'email' });
+            if (err) throw err;
             window.location.href = "/";
         } catch (err) {
             setError(err.message || "Código inválido");
         } finally { setLoading(false); }
     };
 
-    const handleGoogle = () => base44.auth.loginWithProvider("google", "/");
+    const handleResend = async () => {
+        const { error: err } = await supabase.auth.resend({ type: 'signup', email });
+        if (err) setError(err.message);
+    };
+
+    const handleGoogle = () => {
+        supabase.auth.signInWithOAuth({
+            provider: 'google',
+            options: { redirectTo: window.location.origin },
+        });
+    };
 
     return (
         <div className="min-h-screen flex items-center justify-center bg-background p-4">
@@ -85,7 +96,7 @@ export default function Register() {
                             <Button type="submit" className="w-full" disabled={loading}>
                                 {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}Verificar
                             </Button>
-                            <Button type="button" variant="ghost" className="w-full text-sm" onClick={() => base44.auth.resendOtp(email)}>Reenviar código</Button>
+                            <Button type="button" variant="ghost" className="w-full text-sm" onClick={handleResend}>Reenviar código</Button>
                         </form>
                     )}
                     <p className="text-center text-sm text-muted-foreground">¿Ya tienes cuenta? <Link to="/sign-in" className="text-primary hover:underline">Inicia sesión</Link></p>

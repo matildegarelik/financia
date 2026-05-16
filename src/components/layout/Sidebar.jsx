@@ -4,7 +4,7 @@ import {
     LayoutDashboard, ArrowLeftRight, Wallet, PiggyBank,
     TrendingUp, Tag, BarChart2, Settings, LogOut, X, Wallet as WalletIcon, CloudLightning, MoreHorizontal
 } from "lucide-react";
-import { base44 } from "@/api/base44Client";
+import { supabase } from "@/api/supabaseClient";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -74,7 +74,7 @@ export default function Sidebar() {
 
             <div className="p-3 border-t border-sidebar-border">
                 <button
-                    onClick={() => base44.auth.logout()}
+                    onClick={() => supabase.auth.signOut().then(() => { window.location.href = '/sign-in'; })}
                     className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium w-full text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
                 >
                     <LogOut className="h-4 w-4 flex-shrink-0" />
@@ -170,7 +170,7 @@ export default function Sidebar() {
                         </div>
                         <div className="px-4 pb-4">
                             <button
-                                onClick={() => base44.auth.logout()}
+                                onClick={() => supabase.auth.signOut().then(() => { window.location.href = '/sign-in'; })}
                                 className="flex items-center gap-2 w-full px-4 py-3 rounded-xl text-sm text-muted-foreground hover:bg-muted transition-colors"
                             >
                                 <LogOut className="h-4 w-4" />

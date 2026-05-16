@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
-import { base44 } from "@/api/base44Client";
+import { supabase } from "@/api/supabaseClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,7 +18,8 @@ export default function SignIn() {
         setError("");
         setLoading(true);
         try {
-            await base44.auth.loginViaEmailPassword(email, password);
+            const { error: err } = await supabase.auth.signInWithPassword({ email, password });
+            if (err) throw err;
             window.location.href = "/";
         } catch (err) {
             setError(err.message || "Error al iniciar sesión");
@@ -28,7 +29,10 @@ export default function SignIn() {
     };
 
     const handleGoogle = () => {
-        base44.auth.loginWithProvider("google", "/");
+        supabase.auth.signInWithOAuth({
+            provider: 'google',
+            options: { redirectTo: window.location.origin },
+        });
     };
 
     return (
