@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import PageHeader from "@/components/shared/PageHeader";
 import StatCard from "@/components/shared/StatCard";
 import { formatCurrency, INVESTMENT_TYPES } from "@/lib/formatters";
+import { useCurrency } from "@/lib/currency-context";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 
@@ -22,6 +23,7 @@ export default function Investments() {
     const queryClient = useQueryClient();
 
     const { data: investments = [] } = useQuery({ queryKey: ["investments"], queryFn: () => base44.entities.Investment.list() });
+    const { data: accounts = [] } = useQuery({ queryKey: ["accounts"], queryFn: () => base44.entities.Account.list() });
 
     const createMut = useMutation({
         mutationFn: (d) => base44.entities.Investment.create(d),
@@ -91,21 +93,30 @@ export default function Investments() {
             </div>
 
             <InvestmentFormDialog open={showForm || !!editing} onClose={() => { setShowForm(false); setEditing(null); }}
-                initial={editing} onSubmit={(data) => editing ? updateMut.mutate({ id: editing.id, data }) : createMut.mutate(data)} />
+                initial={editing} accounts={accounts} onSubmit={(data) => editing ? updateMut.mutate({ id: editing.id, data }) : createMut.mutate(data)} />
         </div>
     );
 }
 
-function InvestmentFormDialog({ open, onClose, onSubmit, initial }) {
-    const [form, setForm] = useState(initial || { name: "", type: "stocks", amount_invested: "", current_value: "", currency: "MXN", platform: "", purchase_date: "", notes: "" });
-    React.useEffect(() => { if (initial) setForm(initial); else setForm({ name: "", type: "stocks", amount_invested: "", current_value: "", currency: "MXN", platform: "", purchase_date: "", notes: "" }); }, [initial]);
+function InvestmentFormDialog({ open, onClose, onSubmit, initial, accounts = [] }) {
+    const { activeCurrencies } = useCurrency();
+    const defaultCurrency = activeCurrencies[0] || "MXN";
+    const blank = { name: "", type: "stocks", amount_invested: "", current_value: "", currency: defaultCurrency, platform: "", purchase_date: "", notes: "", account_id: "" };
+    const [form, setForm] = useState(blank);
+    React.useEffect(() => {
+        if (initial) setForm({ ...blank, ...initial, amount_invested: String(initial.amount_invested || ""), current_value: String(initial.current_value || ""), account_id: initial.account_id || "" });
+        else setForm({ ...blank, currency: defaultCurrency });
+    }, [initial, open]);
     const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
     return (
         <Dialog open={open} onOpenChange={onClose}>
             <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
                 <DialogHeader><DialogTitle>{initial ? "Editar" : "Nueva"} inversión</DialogTitle></DialogHeader>
-                <form onSubmit={(e) => { e.preventDefault(); onSubmit({ ...form, amount_invested: parseFloat(form.amount_invested) || 0, current_value: parseFloat(form.current_value) || parseFloat(form.amount_invested) || 0 }); }} className="space-y-4">
+                <form onSubmit={(e) => {
+                    e.preventDefault();
+                    onSubmit({ ...form, amount_invested: parseFloat(form.amount_invested) || 0, current_value: parseFloat(form.current_value) || parseFloat(form.amount_invested) || 0, account_id: form.account_id || null });
+                }} className="space-y-4">
                     <div><Label>Nombre</Label><Input value={form.name} onChange={(e) => set("name", e.target.value)} required /></div>
                     <div><Label>Tipo</Label>
                         <Select value={form.type} onValueChange={(v) => set("type", v)}>
@@ -121,11 +132,23 @@ function InvestmentFormDialog({ open, onClose, onSubmit, initial }) {
                         <div><Label>Moneda</Label>
                             <Select value={form.currency} onValueChange={(v) => set("currency", v)}>
                                 <SelectTrigger><SelectValue /></SelectTrigger>
-                                <SelectContent>{["MXN", "USD", "EUR"].map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                                <SelectContent>{activeCurrencies.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
                             </Select>
                         </div>
                         <div><Label>Fecha de compra</Label><Input type="date" value={form.purchase_date} onChange={(e) => set("purchase_date", e.target.value)} /></div>
                     </div>
+                    {accounts.length > 0 && (
+                        <div>
+                            <Label>Cuenta de origen <span className="text-muted-foreground font-normal text-xs">(opcional)</span></Label>
+                            <Select value={form.account_id || "none"} onValueChange={(v) => set("account_id", v === "none" ? "" : v)}>
+                                <SelectTrigger><SelectValue placeholder="Sin cuenta asociada" /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="none">Sin cuenta asociada</SelectItem>
+                                    {accounts.map((a) => <SelectItem key={a.id} value={a.id}>{a.name} ({a.currency || "MXN"})</SelectItem>)}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    )}
                     <div><Label>Plataforma</Label><Input value={form.platform} onChange={(e) => set("platform", e.target.value)} placeholder="GBM, Bitso, etc." /></div>
                     <div className="flex gap-3">
                         <Button type="button" variant="outline" className="flex-1" onClick={onClose}>Cancelar</Button>

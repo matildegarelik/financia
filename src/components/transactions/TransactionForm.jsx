@@ -8,9 +8,11 @@ import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ChevronDown } from "lucide-react";
+import { useCurrency } from "@/lib/currency-context";
 
 export default function TransactionForm({ open, onClose, onSubmit, accounts = [], categories = [], initial }) {
-    const [form, setForm] = useState(getDefault(initial));
+    const { activeCurrencies } = useCurrency();
+    const [form, setForm] = useState(() => getDefault(initial));
     const [showExtra, setShowExtra] = useState(false);
     useEffect(() => { setForm(getDefault(initial)); setShowExtra(false); }, [initial, open]);
 
@@ -19,7 +21,7 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
             type: "expense",
             status: "confirmed",
             amount: "",
-            currency: "MXN",
+            currency: activeCurrencies[0] || "ARS",
             description: "",
             category_id: "",
             category_name: "",
@@ -66,9 +68,13 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
         onSubmit({
             ...form,
             amount: parseFloat(form.amount) || 0,
-            installment_total: form.installment_total ? parseInt(form.installment_total) : undefined,
-            installment_current: form.installment_current ? parseInt(form.installment_current) : undefined,
-            probability: form.probability ? parseInt(form.probability) : 80,
+            installment_total: form.installment_total ? parseInt(form.installment_total) : null,
+            installment_current: form.installment_current ? parseInt(form.installment_current) : null,
+            probability: form.probability ? parseInt(form.probability) : null,
+            // Convert empty strings to null for UUID columns
+            category_id: form.category_id || null,
+            account_id: form.account_id || null,
+            to_account_id: form.to_account_id || null,
         });
     };
 

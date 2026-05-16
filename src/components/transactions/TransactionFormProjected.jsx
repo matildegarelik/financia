@@ -3,30 +3,30 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { CURRENCIES } from "@/lib/formatters";
+import { useCurrency } from "@/lib/currency-context";
 
-export default function TransactionFormProjected({ open, onClose, onSubmit, accounts = [], categories = [], initial }) {
+export default function TransactionFormProjected({ open, onClose, onSubmit, accounts = [], categories = [], initial, defaultMonth }) {
+    const { activeCurrencies } = useCurrency();
     const [form, setForm] = useState(getDefault(initial));
     useEffect(() => { setForm(getDefault(initial)); }, [initial, open]);
 
     function getDefault(init) {
+        const defaultDate = defaultMonth
+            ? (() => { const [y, m] = defaultMonth.split("-").map(Number); return new Date(y, m, 0).toISOString().split("T")[0]; })()
+            : new Date().toISOString().split("T")[0];
         return {
             type: "income",
             status: "projected",
             amount: "",
-            currency: "MXN",
+            currency: activeCurrencies[0] || "MXN",
             description: "",
             category_id: "",
             category_name: "",
             account_id: "",
-            date: new Date().toISOString().split("T")[0],
-            due_date: "",
-            probability: 70,
+            date: defaultDate,
             project_name: "",
             client_name: "",
-            notes: "",
             ...(init ? { ...init, amount: String(init.amount || "") } : {}),
         };
     }
@@ -41,10 +41,28 @@ export default function TransactionFormProjected({ open, onClose, onSubmit, acco
 
     const handleSubmit = (e) => {
         e.preventDefault();
-        onSubmit({ ...form, amount: parseFloat(form.amount) || 0, probability: parseInt(form.probability) || 70, status: "projected" });
+        const data = {
+            ...form,
+            amount: parseFloat(form.amount) || 0,
+            status: "projected",
+            // Convert empty strings to null for UUID columns
+            category_id: form.category_id || null,
+            account_id: form.account_id || null,
+        };
+        onSubmit(data);
     };
 
     const filteredCategories = categories.filter((c) => c.type === form.type);
+
+    // Build hierarchical order: parents then their children indented
+    const catParents = filteredCategories.filter((c) => !c.parent_category);
+    const catChildren = filteredCategories.filter((c) => !!c.parent_category);
+    const orderedCats = [];
+    catParents.forEach((p) => {
+        orderedCats.push({ ...p, isParent: true });
+        catChildren.filter((c) => c.parent_category === p.id).forEach((c) => orderedCats.push({ ...c, isParent: false }));
+    });
+    catChildren.filter((c) => !catParents.find((p) => p.id === c.parent_category)).forEach((c) => orderedCats.push({ ...c, isParent: false }));
 
     return (
         <Dialog open={open} onOpenChange={onClose}>
@@ -75,17 +93,10 @@ export default function TransactionFormProjected({ open, onClose, onSubmit, acco
                             <Select value={form.currency} onValueChange={(v) => set("currency", v)}>
                                 <SelectTrigger><SelectValue /></SelectTrigger>
                                 <SelectContent>
-                                    {CURRENCIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                                    {activeCurrencies.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                                 </SelectContent>
                             </Select>
                         </div>
-                    </div>
-
-                    <div>
-                        <Label>Probabilidad: {form.probability}%</Label>
-                        <input type="range" min="1" max="100" value={form.probability}
-                            onChange={(e) => set("probability", e.target.value)}
-                            className="w-full accent-primary" />
                     </div>
 
                     <div>
@@ -96,15 +107,24 @@ export default function TransactionFormProjected({ open, onClose, onSubmit, acco
 
                     <div className="grid grid-cols-2 gap-2">
                         <div>
-                            <Label>Fecha estimada</Label>
-                            <Input type="date" value={form.date} onChange={(e) => set("date", e.target.value)} required />
+                            <Label>Mes</Label>
+                            <Input type="month" value={form.date ? form.date.slice(0, 7) : ""}
+                                onChange={(e) => {
+                                    const [y, m] = e.target.value.split("-").map(Number);
+                                    const lastDay = new Date(y, m, 0).toISOString().split("T")[0];
+                                    set("date", lastDay);
+                                }} required />
                         </div>
                         <div>
                             <Label>Categoría</Label>
-                            <Select value={form.category_id} onValueChange={handleCategoryChange}>
+                            <Select value={form.category_id || ""} onValueChange={handleCategoryChange}>
                                 <SelectTrigger><SelectValue placeholder="Categoría" /></SelectTrigger>
                                 <SelectContent>
-                                    {filteredCategories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                                    {orderedCats.map((c) => (
+                                        <SelectItem key={c.id} value={c.id}>
+                                            {c.isParent ? c.name : `  ↳ ${c.name}`}
+                                        </SelectItem>
+                                    ))}
                                 </SelectContent>
                             </Select>
                         </div>

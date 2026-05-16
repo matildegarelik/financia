@@ -10,7 +10,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import PageHeader from "@/components/shared/PageHeader";
 import TransactionForm from "@/components/transactions/TransactionForm";
-import { formatCurrency, formatDate, TRANSACTION_STATUS, TODAY } from "@/lib/formatters";
+import { formatCurrency, formatCurrencyCode, formatDate, TRANSACTION_STATUS, TODAY } from "@/lib/formatters";
 import { useCurrency } from "@/lib/currency-context";
 import { ArrowDownLeft, ArrowUpRight, ArrowLeftRight } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -203,11 +203,11 @@ export default function Transactions() {
                                             <div className="text-right">
                                                 <p className={cn("text-sm font-semibold", cfg.color)}>
                                                     {tx.type === "income" ? "+" : tx.type === "expense" ? "-" : ""}
-                                                    {formatCurrency(tx.amount, tx.currency || "MXN")}
+                                                    {formatCurrencyCode(tx.amount, tx.currency || "MXN")}
                                                 </p>
                                                 {tx.currency && tx.currency !== displayCurrency && (
                                                     <p className="text-xs text-muted-foreground">
-                                                        ≈ {formatCurrency(convert(tx.amount, tx.currency || "MXN"), displayCurrency)}
+                                                        ≈ {formatCurrencyCode(convert(tx.amount, tx.currency || "MXN"), displayCurrency)}
                                                     </p>
                                                 )}
                                             </div>

@@ -11,7 +11,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import PageHeader from "@/components/shared/PageHeader";
-import { formatCurrency } from "@/lib/formatters";
+import { formatCurrency, formatCurrencyCode } from "@/lib/formatters";
+import { useCurrency } from "@/lib/currency-context";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 import { format, startOfMonth, endOfMonth, addMonths, subMonths } from "date-fns";
@@ -27,6 +28,7 @@ export default function Budgets() {
     const [editing, setEditing] = useState(null);
     const [currentMonth, setCurrentMonth] = useState(new Date());
     const queryClient = useQueryClient();
+    const { displayCurrency, convert } = useCurrency();
 
     const monthKey = toMonthKey(currentMonth);
     const monthStart = format(startOfMonth(currentMonth), "yyyy-MM-dd");
@@ -42,17 +44,25 @@ export default function Budgets() {
     // Budgets for current month (month matches OR budget has no month = template)
     const budgets = allBudgets.filter((b) => b.month === monthKey);
 
+    // Collect all category IDs that match the budget (parent + all its children)
+    const getMatchingCategoryIds = (budget) => {
+        if (!budget.category_id) return null;
+        const ids = new Set([budget.category_id]);
+        categories.forEach((c) => { if (c.parent_category === budget.category_id) ids.add(c.id); });
+        return ids;
+    };
+
     // Calculate spent from real transactions for this month
     const getBudgetSpent = (budget) => {
+        const matchIds = getMatchingCategoryIds(budget);
         return transactions
             .filter((tx) => {
                 if (tx.type !== "expense") return false;
                 if (!tx.date) return false;
                 if (tx.date < monthStart || tx.date > monthEnd) return false;
                 if (tx.status === "projected") return false;
-                // Match by category
-                if (budget.category_id && tx.category_id === budget.category_id) return true;
-                if (!budget.category_id && budget.category_name && tx.category_name === budget.category_name) return true;
+                if (matchIds && tx.category_id && matchIds.has(tx.category_id)) return true;
+                if (!matchIds && budget.category_name && tx.category_name === budget.category_name) return true;
                 return false;
             })
             .reduce((s, tx) => s + (tx.amount || 0), 0);
@@ -84,8 +94,8 @@ export default function Budgets() {
         toast.success(`${prevBudgets.length} presupuestos copiados`);
     };
 
-    const totalBudget = budgets.reduce((s, b) => s + (b.amount || 0), 0);
-    const totalSpent = budgets.reduce((s, b) => s + getBudgetSpent(b), 0);
+    const totalBudget = budgets.reduce((s, b) => s + convert(b.amount || 0, b.currency || "MXN"), 0);
+    const totalSpent = budgets.reduce((s, b) => s + convert(getBudgetSpent(b), b.currency || "MXN"), 0);
     const isCurrentMonth = monthKey === toMonthKey(new Date());
 
     return (
@@ -125,7 +135,7 @@ export default function Budgets() {
                         <div className="flex justify-between text-sm mb-2">
                             <span className="text-muted-foreground">Total gastado</span>
                             <span className="font-medium">
-                                {formatCurrency(totalSpent)} / {formatCurrency(totalBudget)}
+                                {formatCurrencyCode(totalSpent, displayCurrency)} / {formatCurrencyCode(totalBudget, displayCurrency)}
                             </span>
                         </div>
                         <Progress
@@ -134,8 +144,8 @@ export default function Budgets() {
                         />
                         <p className={cn("text-xs mt-1.5 text-right font-medium", totalSpent > totalBudget ? "text-destructive" : "text-muted-foreground")}>
                             {totalSpent > totalBudget
-                                ? `Excedido ${formatCurrency(totalSpent - totalBudget)}`
-                                : `${formatCurrency(totalBudget - totalSpent)} restante`}
+                                ? `Excedido ${formatCurrencyCode(totalSpent - totalBudget, displayCurrency)}`
+                                : `${formatCurrencyCode(totalBudget - totalSpent, displayCurrency)} restante`}
                         </p>
                     </CardContent>
                 </Card>
@@ -168,20 +178,28 @@ export default function Budgets() {
                                 <Card className="hover:shadow-lg transition-shadow">
                                     <CardContent className="p-5 space-y-3">
                                         <div className="flex items-center justify-between">
-                                            <p className="font-semibold">{b.category_name}</p>
-                                            <div className="flex gap-1">
+                                            <div className="min-w-0">
+                                                <p className="font-semibold truncate">{b.category_name}</p>
+                                                {b.category_id && (() => {
+                                                    const childCount = categories.filter((c) => c.parent_category === b.category_id).length;
+                                                    return childCount > 0
+                                                        ? <p className="text-xs text-muted-foreground">incluye {childCount} subcategoría{childCount > 1 ? "s" : ""}</p>
+                                                        : null;
+                                                })()}
+                                            </div>
+                                            <div className="flex gap-1 shrink-0">
                                                 <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditing(b)}><Pencil className="h-3.5 w-3.5" /></Button>
                                                 <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => deleteMut.mutate(b.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
                                             </div>
                                         </div>
                                         <Progress value={pct} className={cn(over ? "[&>div]:bg-destructive" : pct > 80 ? "[&>div]:bg-yellow-500" : "[&>div]:bg-primary")} />
                                         <div className="flex justify-between text-sm">
-                                            <span className="text-muted-foreground">{formatCurrency(spent)} gastado</span>
+                                            <span className="text-muted-foreground">{formatCurrencyCode(spent, b.currency || "MXN")} gastado</span>
                                             <span className={cn("font-medium", over ? "text-destructive" : "text-primary")}>
-                                                {over ? `Excedido ${formatCurrency(Math.abs(remaining))}` : `${formatCurrency(remaining)} restante`}
+                                                {over ? `Excedido ${formatCurrencyCode(Math.abs(remaining), b.currency || "MXN")}` : `${formatCurrencyCode(remaining, b.currency || "MXN")} restante`}
                                             </span>
                                         </div>
-                                        <p className="text-xs text-muted-foreground text-right">{pct.toFixed(0)}% de {formatCurrency(b.amount)}</p>
+                                        <p className="text-xs text-muted-foreground text-right">{pct.toFixed(0)}% de {formatCurrencyCode(b.amount, b.currency || "MXN")}</p>
                                     </CardContent>
                                 </Card>
                             </motion.div>
@@ -203,10 +221,12 @@ export default function Budgets() {
 }
 
 function BudgetFormDialog({ open, onClose, onSubmit, initial, categories, monthKey }) {
-    const [form, setForm] = useState({ category_name: "", amount: "", period: "monthly", spent: 0 });
+    const { activeCurrencies } = useCurrency();
+    const defaultCurrency = activeCurrencies[0] || "MXN";
+    const [form, setForm] = useState({ category_name: "", amount: "", period: "monthly", spent: 0, currency: defaultCurrency });
     useEffect(() => {
-        if (initial) setForm({ ...initial, amount: String(initial.amount || "") });
-        else setForm({ category_name: "", amount: "", period: "monthly", spent: 0 });
+        if (initial) setForm({ ...initial, amount: String(initial.amount || ""), currency: initial.currency || defaultCurrency });
+        else setForm({ category_name: "", amount: "", period: "monthly", spent: 0, currency: defaultCurrency });
     }, [initial, open]);
     const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
@@ -216,22 +236,57 @@ function BudgetFormDialog({ open, onClose, onSubmit, initial, categories, monthK
         set("category_name", cat?.name || "");
     };
 
+    // Build ordered list: parents first, then their children indented
+    const parents = categories.filter((c) => !c.parent_category);
+    const children = categories.filter((c) => !!c.parent_category);
+    const orderedCats = [];
+    parents.forEach((p) => {
+        orderedCats.push({ ...p, isParent: true });
+        children.filter((c) => c.parent_category === p.id).forEach((c) => orderedCats.push({ ...c, isParent: false }));
+    });
+    // Orphan children (parent is income type, filtered out)
+    children.filter((c) => !parents.find((p) => p.id === c.parent_category)).forEach((c) => orderedCats.push({ ...c, isParent: false }));
+
     return (
         <Dialog open={open} onOpenChange={onClose}>
             <DialogContent className="max-w-sm">
                 <DialogHeader><DialogTitle>{initial ? "Editar" : "Nuevo"} presupuesto</DialogTitle></DialogHeader>
-                <form onSubmit={(e) => { e.preventDefault(); onSubmit({ ...form, amount: parseFloat(form.amount) || 0 }); }} className="space-y-4">
-                    <div><Label>Categoría</Label>
-                        {categories.length > 0 ? (
-                            <Select value={form.category_id || ""} onValueChange={handleCat}>
-                                <SelectTrigger><SelectValue placeholder="Seleccionar" /></SelectTrigger>
-                                <SelectContent>{categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
-                            </Select>
+                <form onSubmit={(e) => {
+                        e.preventDefault();
+                        if (!form.category_id && !form.category_name.trim()) return;
+                        onSubmit({ ...form, amount: parseFloat(form.amount) || 0 });
+                    }} className="space-y-4">
+                    <div>
+                        <Label>Categoría <span className="text-destructive">*</span></Label>
+                        <p className="text-xs text-muted-foreground mb-1.5">
+                            Si elegís una categoría padre, se suman los gastos de todas sus subcategorías.
+                        </p>
+                        {categories.length === 0 ? (
+                            <p className="text-sm text-muted-foreground border rounded-md px-3 py-2">
+                                Primero creá categorías de gasto en la sección <strong>Categorías</strong>.
+                            </p>
                         ) : (
-                            <Input value={form.category_name} onChange={(e) => set("category_name", e.target.value)} placeholder="Nombre de categoría" />
+                            <Select value={form.category_id || ""} onValueChange={handleCat} required>
+                                <SelectTrigger><SelectValue placeholder="Seleccionar categoría" /></SelectTrigger>
+                                <SelectContent>
+                                    {orderedCats.map((c) => (
+                                        <SelectItem key={c.id} value={c.id}>
+                                            {c.isParent ? c.name : `  ↳ ${c.name}`}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
                         )}
                     </div>
-                    <div><Label>Monto presupuestado</Label><Input type="number" step="0.01" value={form.amount} onChange={(e) => set("amount", e.target.value)} required /></div>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div><Label>Monto</Label><Input type="number" step="0.01" value={form.amount} onChange={(e) => set("amount", e.target.value)} required /></div>
+                        <div><Label>Moneda</Label>
+                            <Select value={form.currency} onValueChange={(v) => set("currency", v)}>
+                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                <SelectContent>{activeCurrencies.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                            </Select>
+                        </div>
+                    </div>
                     <div className="flex gap-3">
                         <Button type="button" variant="outline" className="flex-1" onClick={onClose}>Cancelar</Button>
                         <Button type="submit" className="flex-1">{initial ? "Guardar" : "Crear"}</Button>

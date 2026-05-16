@@ -51,7 +51,7 @@ export default function Dashboard() {
     const monthlyIncome = monthlyTx.filter((t) => t.type === "income").reduce((s, t) => s + convert(t.amount || 0, t.currency || "MXN"), 0);
     const monthlyExpense = monthlyTx.filter((t) => t.type === "expense").reduce((s, t) => s + convert(t.amount || 0, t.currency || "MXN"), 0);
 
-    const futureTx = transactions.filter((t) => t.date > TODAY);
+    const futureTx = transactions.filter((t) => t.date > TODAY && t.status !== "projected");
     const isLoading = loadingTx || loadingAcc;
 
     if (isLoading) {
@@ -118,7 +118,7 @@ export default function Dashboard() {
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <SpendingChart transactions={monthlyTx} />
-                <RecentTransactions transactions={transactions.filter((t) => t.date <= TODAY).slice(0, 6)} />
+                <RecentTransactions transactions={transactions.filter((t) => t.date <= TODAY && t.status !== "projected").slice(0, 6)} />
             </div>
         </div>
     );

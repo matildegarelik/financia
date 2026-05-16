@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import PageHeader from "@/components/shared/PageHeader";
-import { RefreshCw, Save, AlertCircle, Loader2, Check, Plus, X, Star } from "lucide-react";
+import { RefreshCw, Save, AlertCircle, Loader2, Check, Plus, X, Star, Bitcoin } from "lucide-react";
 import { toast } from "sonner";
 import { useCurrency } from "@/lib/currency-context";
 import { navItems, loadFavPaths, saveFavPaths } from "@/components/layout/Sidebar";
@@ -27,7 +27,7 @@ const CURRENCY_INFO = {
 
 export default function Settings() {
     const queryClient = useQueryClient();
-    const { activeCurrencies, setActiveCurrencies, allCurrencies } = useCurrency();
+    const { activeCurrencies, setActiveCurrencies, allCurrencies, addCustomCurrency } = useCurrency();
     const { data: exchangeRates = [], isLoading } = useQuery({
         queryKey: ["exchangeRates"],
         queryFn: () => base44.entities.ExchangeRate.list(),
@@ -36,6 +36,26 @@ export default function Settings() {
         queryKey: ["accounts"],
         queryFn: () => base44.entities.Account.list(),
     });
+    const { data: transactions = [] } = useQuery({
+        queryKey: ["transactions"],
+        queryFn: () => base44.entities.Transaction.list("-date", 500),
+    });
+
+    const today = new Date().toISOString().split("T")[0];
+    function computeEffectiveBalance(acc) {
+        const initial = acc.balance || 0;
+        return transactions
+            .filter((tx) => tx.status !== "projected" && tx.date && tx.date <= today)
+            .reduce((sum, tx) => {
+                if (tx.account_id === acc.id) {
+                    if (tx.type === "income") return sum + (tx.amount || 0);
+                    if (tx.type === "expense") return sum - (tx.amount || 0);
+                    if (tx.type === "transfer") return sum - (tx.amount || 0);
+                }
+                if (tx.to_account_id === acc.id && tx.type === "transfer") return sum + (tx.amount || 0);
+                return sum;
+            }, initial);
+    }
 
     const [rateValues, setRateValues] = useState({});
     const [loadingRates, setLoadingRates] = useState(false);
@@ -99,6 +119,7 @@ export default function Settings() {
     };
 
     const [showAddCurrency, setShowAddCurrency] = useState(false);
+    const [customCurrencyInput, setCustomCurrencyInput] = useState("");
     const [favPaths, setFavPathsState] = useState(loadFavPaths);
 
     const toggleFav = (path) => {
@@ -125,6 +146,24 @@ export default function Settings() {
             setActiveCurrencies([...activeCurrencies, cur]);
         }
         setShowAddCurrency(false);
+        setCustomCurrencyInput("");
+    };
+
+    const addCustomCurrencyAndActivate = () => {
+        const code = customCurrencyInput.trim().toUpperCase();
+        if (code.length < 2 || code.length > 10 || !/^[A-Z0-9]+$/.test(code)) {
+            toast.error("Código inválido. Usá letras y números, entre 2 y 10 caracteres.");
+            return;
+        }
+        if (activeCurrencies.includes(code)) {
+            toast.error("Esa moneda ya está activa");
+            return;
+        }
+        addCustomCurrency(code);
+        setActiveCurrencies([...activeCurrencies, code]);
+        setShowAddCurrency(false);
+        setCustomCurrencyInput("");
+        toast.success(`${code} agregada`);
     };
 
     // Generar pares dinámicamente con las monedas activas
@@ -208,24 +247,42 @@ export default function Settings() {
                                 Agregar
                             </button>
                         ) : (
-                            <div className="flex flex-wrap gap-2 w-full mt-1">
-                                {inactiveCurrencies.map((cur) => {
-                                    const info = CURRENCY_INFO[cur] || { name: cur, flag: "💱" };
-                                    return (
-                                        <button
-                                            key={cur}
-                                            onClick={() => addCurrency(cur)}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border-2 border-border hover:border-primary bg-muted/30 hover:bg-primary/5 transition-all"
-                                        >
-                                            <span>{info.flag}</span>
-                                            <span className="font-mono font-semibold text-sm">{cur}</span>
-                                            <span className="text-xs text-muted-foreground">{info.name}</span>
-                                        </button>
-                                    );
-                                })}
-                                <button onClick={() => setShowAddCurrency(false)} className="text-xs text-muted-foreground hover:text-foreground px-2">
-                                    Cancelar
-                                </button>
+                            <div className="flex flex-col gap-3 w-full mt-1">
+                                {inactiveCurrencies.length > 0 && (
+                                    <div className="flex flex-wrap gap-2">
+                                        {inactiveCurrencies.map((cur) => {
+                                            const info = CURRENCY_INFO[cur] || { name: cur, flag: "💱" };
+                                            return (
+                                                <button
+                                                    key={cur}
+                                                    onClick={() => addCurrency(cur)}
+                                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border-2 border-border hover:border-primary bg-muted/30 hover:bg-primary/5 transition-all"
+                                                >
+                                                    <span>{info.flag}</span>
+                                                    <span className="font-mono font-semibold text-sm">{cur}</span>
+                                                    <span className="text-xs text-muted-foreground">{info.name}</span>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                                <div className="flex items-center gap-2">
+                                    <Bitcoin className="h-4 w-4 text-muted-foreground shrink-0" />
+                                    <Input
+                                        placeholder="Código custom (ej: USDT, BTC, ETH)"
+                                        value={customCurrencyInput}
+                                        onChange={(e) => setCustomCurrencyInput(e.target.value.toUpperCase())}
+                                        onKeyDown={(e) => e.key === "Enter" && addCustomCurrencyAndActivate()}
+                                        maxLength={10}
+                                        className="h-8 text-sm font-mono w-56"
+                                    />
+                                    <Button size="sm" className="h-8 px-3" onClick={addCustomCurrencyAndActivate} disabled={!customCurrencyInput.trim()}>
+                                        <Plus className="h-3.5 w-3.5" />
+                                    </Button>
+                                    <button onClick={() => { setShowAddCurrency(false); setCustomCurrencyInput(""); }} className="text-xs text-muted-foreground hover:text-foreground px-2">
+                                        Cancelar
+                                    </button>
+                                </div>
                             </div>
                         )}
                     </div>
@@ -287,28 +344,37 @@ export default function Settings() {
             {/* Account initial balances */}
             <Card>
                 <CardHeader>
-                    <CardTitle className="text-base">Saldos de cuentas</CardTitle>
+                    <CardTitle className="text-base">Saldos iniciales de cuentas</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                    <p className="text-sm text-muted-foreground">Establece o corrige el saldo actual de cada cuenta.</p>
-                    {accounts.map((acc) => (
-                        <div key={acc.id} className="flex items-center gap-3">
-                            <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium truncate">{acc.name}</p>
-                                <p className="text-xs text-muted-foreground">{acc.type} · {acc.currency || "MXN"}</p>
+                    <p className="text-sm text-muted-foreground">El saldo inicial es el punto de partida. El saldo actual se calcula sumando las transacciones registradas.</p>
+                    {accounts.map((acc) => {
+                        const effective = computeEffectiveBalance(acc);
+                        return (
+                            <div key={acc.id} className="flex items-center gap-3">
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-medium truncate">{acc.name}</p>
+                                    <p className="text-xs text-muted-foreground">{acc.type} · {acc.currency || "MXN"}</p>
+                                    <p className="text-xs text-primary font-medium">Saldo actual: {effective.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {acc.currency || "MXN"}</p>
+                                </div>
+                                <div className="flex flex-col items-end gap-1">
+                                    <p className="text-[10px] text-muted-foreground">Saldo inicial</p>
+                                    <div className="flex items-center gap-1.5">
+                                        <Input
+                                            type="number" step="0.01"
+                                            value={accountBalances[acc.id] ?? String(acc.balance || 0)}
+                                            onChange={(e) => setAccountBalances((p) => ({ ...p, [acc.id]: e.target.value }))}
+                                            className="w-32 h-8 text-sm"
+                                        />
+                                        <Button size="sm" className="h-8 px-3" variant="outline"
+                                            onClick={() => saveBalanceMut.mutate({ id: acc.id, balance: accountBalances[acc.id] })}>
+                                            <Save className="h-3.5 w-3.5" />
+                                        </Button>
+                                    </div>
+                                </div>
                             </div>
-                            <Input
-                                type="number" step="0.01"
-                                value={accountBalances[acc.id] ?? String(acc.balance || 0)}
-                                onChange={(e) => setAccountBalances((p) => ({ ...p, [acc.id]: e.target.value }))}
-                                className="w-36 h-8 text-sm"
-                            />
-                            <Button size="sm" className="h-8 px-3" variant="outline"
-                                onClick={() => saveBalanceMut.mutate({ id: acc.id, balance: accountBalances[acc.id] })}>
-                                <Save className="h-3.5 w-3.5" />
-                            </Button>
-                        </div>
-                    ))}
+                        );
+                    })}
                 </CardContent>
             </Card>
         </div>

@@ -1,14 +1,34 @@
-export const CURRENCIES = ["MXN", "USD", "EUR", "ARS"];
+export const CURRENCIES = ["ARS", "USD", "EUR", "MXN"];
 
-export function formatCurrency(amount, currency = "MXN") {
-    const locales = { MXN: "es-MX", USD: "en-US", EUR: "es-ES", ARS: "es-AR" };
-    const loc = locales[currency] || "es-MX";
-    return new Intl.NumberFormat(loc, {
-        style: "currency",
-        currency: currency || "MXN",
-        minimumFractionDigits: 0,
-        maximumFractionDigits: 2,
-    }).format(amount || 0);
+export function formatCurrencyCode(amount, currency = "ARS") {
+    try {
+        const locales = { MXN: "es-MX", USD: "en-US", EUR: "es-ES", ARS: "es-AR", COP: "es-CO", CLP: "es-CL", PEN: "es-PE" };
+        const loc = locales[currency] || "en-US";
+        return new Intl.NumberFormat(loc, {
+            style: "currency",
+            currency,
+            currencyDisplay: "code",
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 2,
+        }).format(amount || 0);
+    } catch {
+        return `${(amount || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 8 })} ${currency}`;
+    }
+}
+
+export function formatCurrency(amount, currency = "ARS") {
+    try {
+        const locales = { MXN: "es-MX", USD: "en-US", EUR: "es-ES", ARS: "es-AR", COP: "es-CO", CLP: "es-CL", PEN: "es-PE" };
+        const loc = locales[currency] || "en-US";
+        return new Intl.NumberFormat(loc, {
+            style: "currency",
+            currency: currency || "ARS",
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 2,
+        }).format(amount || 0);
+    } catch {
+        return `${(amount || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 8 })} ${currency}`;
+    }
 }
 
 export function formatDate(dateStr) {
@@ -55,8 +75,10 @@ export const ACCOUNT_TYPES = {
     checking: "Cuenta corriente",
     savings: "Ahorro",
     credit_card: "Tarjeta de crédito",
+    debit_card: "Tarjeta de débito",
     cash: "Efectivo",
     investment: "Inversión",
+    crypto: "Cuenta cripto",
     other: "Otro",
 };
 
