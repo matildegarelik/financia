@@ -111,7 +111,7 @@ export default function Sidebar() {
             </aside>
 
             {/* Mobile bottom nav */}
-            <nav className="fixed bottom-0 left-0 right-0 bg-card border-t border-border z-40 lg:hidden">
+            <nav className="fixed bottom-0 left-0 right-0 bg-card border-t border-border z-40 lg:hidden" style={{ paddingBottom: '15px' }}>
                 <div className="flex items-center">
                     {favItems.slice(0, 5).map((item) => {
                         const isActive = location.pathname === item.path;

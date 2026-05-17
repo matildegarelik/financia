@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import { useCurrency } from "@/lib/currency-context";
 import { navItems, loadFavPaths, saveFavPaths } from "@/components/layout/Sidebar";
 import { cn } from "@/lib/utils";
-import { Reorder } from "framer-motion";
+import { Reorder, useDragControls } from "framer-motion";
 
 const CURRENCY_INFO = {
     MXN: { name: "Peso Mexicano", flag: "🇲🇽" },
@@ -21,6 +21,40 @@ const CURRENCY_INFO = {
     CLP: { name: "Peso Chileno", flag: "🇨🇱" },
     PEN: { name: "Sol Peruano", flag: "🇵🇪" },
 };
+
+function CurrencyItem({ cur, idx, total, onMove, onRemove }) {
+    const controls = useDragControls();
+    const info = CURRENCY_INFO[cur] || { name: cur, flag: "💱" };
+    return (
+        <Reorder.Item key={cur} value={cur} as="div" dragControls={controls} dragListener={false}
+            className="flex items-center gap-2 p-2 rounded-lg border bg-card hover:bg-muted/30 transition-colors select-none">
+            <div
+                onPointerDown={(e) => controls.start(e)}
+                className="cursor-grab active:cursor-grabbing touch-none text-muted-foreground/30 hover:text-muted-foreground/60 transition-colors shrink-0">
+                <GripVertical className="h-4 w-4" />
+            </div>
+            <span className="text-lg">{info.flag}</span>
+            <div className="flex-1 min-w-0">
+                <p className="font-mono font-semibold text-sm leading-none">{cur}</p>
+                <p className="text-[11px] text-muted-foreground truncate mt-0.5">{info.name}</p>
+            </div>
+            <div className="flex items-center gap-0.5 shrink-0">
+                <button onClick={() => onMove(idx, -1)} disabled={idx === 0}
+                    className="p-1 rounded text-muted-foreground hover:text-foreground disabled:opacity-25 transition-colors">
+                    <ChevronUp className="h-3.5 w-3.5" />
+                </button>
+                <button onClick={() => onMove(idx, 1)} disabled={idx === total - 1}
+                    className="p-1 rounded text-muted-foreground hover:text-foreground disabled:opacity-25 transition-colors">
+                    <ChevronDown className="h-3.5 w-3.5" />
+                </button>
+                <button onClick={() => onRemove(cur)}
+                    className="p-1 rounded text-muted-foreground hover:text-destructive transition-colors">
+                    <X className="h-3.5 w-3.5" />
+                </button>
+            </div>
+        </Reorder.Item>
+    );
+}
 
 export default function Settings() {
     const queryClient = useQueryClient();
@@ -223,36 +257,16 @@ export default function Settings() {
                         </CardHeader>
                         <CardContent className="space-y-2">
                             <Reorder.Group as="div" axis="y" values={activeCurrencies} onReorder={setActiveCurrencies} className="space-y-2">
-                                {activeCurrencies.map((cur, idx) => {
-                                    const info = CURRENCY_INFO[cur] || { name: cur, flag: "💱" };
-                                    return (
-                                        <Reorder.Item key={cur} value={cur} as="div"
-                                            className="flex items-center gap-2 p-2 rounded-lg border bg-card hover:bg-muted/30 transition-colors select-none">
-                                            <div className="cursor-grab active:cursor-grabbing touch-none text-muted-foreground/30 hover:text-muted-foreground/60 transition-colors shrink-0">
-                                                <GripVertical className="h-4 w-4" />
-                                            </div>
-                                            <span className="text-lg">{info.flag}</span>
-                                            <div className="flex-1 min-w-0">
-                                                <p className="font-mono font-semibold text-sm leading-none">{cur}</p>
-                                                <p className="text-[11px] text-muted-foreground truncate mt-0.5">{info.name}</p>
-                                            </div>
-                                            <div className="flex items-center gap-0.5 shrink-0">
-                                                <button onClick={() => moveCurrency(idx, -1)} disabled={idx === 0}
-                                                    className="p-1 rounded text-muted-foreground hover:text-foreground disabled:opacity-25 transition-colors">
-                                                    <ChevronUp className="h-3.5 w-3.5" />
-                                                </button>
-                                                <button onClick={() => moveCurrency(idx, 1)} disabled={idx === activeCurrencies.length - 1}
-                                                    className="p-1 rounded text-muted-foreground hover:text-foreground disabled:opacity-25 transition-colors">
-                                                    <ChevronDown className="h-3.5 w-3.5" />
-                                                </button>
-                                                <button onClick={() => removeCurrency(cur)}
-                                                    className="p-1 rounded text-muted-foreground hover:text-destructive transition-colors">
-                                                    <X className="h-3.5 w-3.5" />
-                                                </button>
-                                            </div>
-                                        </Reorder.Item>
-                                    );
-                                })}
+                                {activeCurrencies.map((cur, idx) => (
+                                    <CurrencyItem
+                                        key={cur}
+                                        cur={cur}
+                                        idx={idx}
+                                        total={activeCurrencies.length}
+                                        onMove={moveCurrency}
+                                        onRemove={removeCurrency}
+                                    />
+                                ))}
                             </Reorder.Group>
 
                             {!showAddCurrency ? (

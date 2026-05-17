@@ -32,14 +32,8 @@ export default function Projected() {
     const [editing, setEditing] = useState(null);
     const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth());
     const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
-    const [expandedMonths, setExpandedMonths] = useState(new Set());
     const [expandedYears, setExpandedYears] = useState(new Set());
 
-    const toggleMonth = (yyyymm) => setExpandedMonths((prev) => {
-        const next = new Set(prev);
-        next.has(yyyymm) ? next.delete(yyyymm) : next.add(yyyymm);
-        return next;
-    });
     const toggleYear = (year) => setExpandedYears((prev) => {
         const next = new Set(prev);
         next.has(year) ? next.delete(year) : next.add(year);
@@ -232,25 +226,24 @@ export default function Projected() {
         const entries = Object.entries(byC).filter(([, v]) => v !== 0);
 
         if (entries.length === 0) {
-            return <p className={cn("text-sm font-semibold", colorClass)}>{formatCurrencyCode(0, displayCurrency)}</p>;
+            return <p className={cn("text-xs sm:text-sm font-semibold break-all", colorClass)}>{formatCurrencyCode(0, displayCurrency)}</p>;
         }
 
-        // Single currency matching displayCurrency — no expansion needed
         const needsExpansion = entries.length > 1 || entries[0][0] !== displayCurrency;
         if (!needsExpansion) {
-            return <p className={cn("text-sm font-semibold", colorClass)}>{formatCurrencyCode(entries[0][1], entries[0][0])}</p>;
+            return <p className={cn("text-xs sm:text-sm font-semibold break-all", colorClass)}>{formatCurrencyCode(entries[0][1], entries[0][0])}</p>;
         }
 
         return (
             <div>
                 <button type="button" className="inline-flex items-center gap-1" onClick={() => setExpanded((e) => !e)}>
-                    <span className={cn("text-sm font-semibold", colorClass)}>{formatCurrencyCode(total, displayCurrency)}</span>
+                    <span className={cn("text-xs sm:text-sm font-semibold break-all", colorClass)}>{formatCurrencyCode(total, displayCurrency)}</span>
                     <ChevronDown className={cn("h-3 w-3 text-muted-foreground shrink-0 transition-transform", expanded && "rotate-180")} />
                 </button>
                 {expanded && (
                     <div className="mt-1 space-y-0.5">
                         {entries.map(([c, v]) => (
-                            <p key={c} className="text-xs text-muted-foreground leading-tight">{formatCurrencyCode(v, c)}</p>
+                            <p key={c} className="text-xs text-muted-foreground leading-tight break-all">{formatCurrencyCode(v, c)}</p>
                         ))}
                     </div>
                 )}
@@ -341,49 +334,49 @@ export default function Projected() {
 
                     {isFuture ? (
                         /* ── Futuro: solo proyectado ── */
-                        <div className="grid grid-cols-3 gap-3">
-                            <Card><CardContent className="p-4">
-                                <p className="text-xs text-muted-foreground mb-1.5">Ingresos proy.</p>
+                        <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                            <Card><CardContent className="p-2 sm:p-4">
+                                <p className="text-[10px] sm:text-xs text-muted-foreground mb-1 sm:mb-1.5">Ingresos proy.</p>
                                 <CurrencyLines byC={projIncomeByC} total={projIncome} colorClass="text-primary" />
                             </CardContent></Card>
-                            <Card><CardContent className="p-4">
-                                <p className="text-xs text-muted-foreground mb-1.5">Gastos proy.</p>
+                            <Card><CardContent className="p-2 sm:p-4">
+                                <p className="text-[10px] sm:text-xs text-muted-foreground mb-1 sm:mb-1.5">Gastos proy.</p>
                                 <CurrencyLines byC={projExpenseByC} total={projExpense} colorClass="text-destructive" />
                             </CardContent></Card>
-                            <Card><CardContent className="p-4">
-                                <p className="text-xs text-muted-foreground mb-1.5">Ahorro esperado</p>
-                                <p className={cn("text-sm font-semibold", projSavings >= 0 ? "text-primary" : "text-destructive")}>
+                            <Card><CardContent className="p-2 sm:p-4">
+                                <p className="text-[10px] sm:text-xs text-muted-foreground mb-1 sm:mb-1.5">Ahorro esp.</p>
+                                <p className={cn("text-xs sm:text-sm font-semibold break-all", projSavings >= 0 ? "text-primary" : "text-destructive")}>
                                     {formatCurrencyCode(projSavings, displayCurrency)}
                                 </p>
                             </CardContent></Card>
                         </div>
                     ) : isPast ? (
                         /* ── Pasado: real es primario, proyectado colapsable ── */
-                        <div className="grid grid-cols-3 gap-3">
+                        <div className="grid grid-cols-3 gap-2 sm:gap-3">
                             {[
                                 { key: "income", label: "Ingresos", byC: realIncomeByC, total: realIncome, projByC: projIncomeByC, projTotal: projIncome, diff: diffIncome, colorClass: "text-primary", diffGood: diffIncome >= 0 },
                                 { key: "expense", label: "Gastos", byC: realExpenseByC, total: realExpense, projByC: projExpenseByC, projTotal: projExpense, diff: diffExpense, colorClass: "text-destructive", diffGood: diffExpense <= 0 },
                                 { key: "savings", label: "Ahorro", byC: null, total: realSavings, projTotal: projSavings, diff: diffSavings, colorClass: realSavings >= 0 ? "text-primary" : "text-destructive", diffGood: diffSavings >= 0 },
                             ].map(({ key, label, byC, total, projByC, projTotal, diff, colorClass, diffGood }) => (
                                 <Card key={key} className="cursor-pointer" onClick={() => togglePast(key)}>
-                                    <CardContent className="p-4">
-                                        <div className="flex items-center justify-between mb-1.5">
-                                            <p className="text-xs text-muted-foreground">{label}</p>
-                                            <ChevronDown className={cn("h-3.5 w-3.5 text-muted-foreground transition-transform shrink-0", pastExpanded[key] && "rotate-180")} />
+                                    <CardContent className="p-2 sm:p-4">
+                                        <div className="flex items-center justify-between mb-1 sm:mb-1.5">
+                                            <p className="text-[10px] sm:text-xs text-muted-foreground">{label}</p>
+                                            <ChevronDown className={cn("h-3 w-3 sm:h-3.5 sm:w-3.5 text-muted-foreground transition-transform shrink-0", pastExpanded[key] && "rotate-180")} />
                                         </div>
                                         {byC
                                             ? <CurrencyLines byC={byC} total={total} colorClass={colorClass} />
-                                            : <p className={cn("text-sm font-semibold", colorClass)}>{formatCurrencyCode(total, displayCurrency)}</p>
+                                            : <p className={cn("text-xs sm:text-sm font-semibold break-all", colorClass)}>{formatCurrencyCode(total, displayCurrency)}</p>
                                         }
                                         {pastExpanded[key] && (
                                             <div className="mt-2 pt-2 border-t border-border/50 space-y-0.5">
                                                 <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Proyectado</p>
                                                 {projByC
                                                     ? <CurrencyLines byC={projByC} total={projTotal} colorClass="text-muted-foreground" />
-                                                    : <p className="text-xs text-muted-foreground font-medium">{formatCurrencyCode(projTotal, displayCurrency)}</p>
+                                                    : <p className="text-xs text-muted-foreground font-medium break-all">{formatCurrencyCode(projTotal, displayCurrency)}</p>
                                                 }
                                                 {diff !== 0 && (
-                                                    <p className={cn("text-xs font-semibold pt-0.5", diffGood ? "text-primary" : "text-destructive")}>
+                                                    <p className={cn("text-xs font-semibold pt-0.5 break-all", diffGood ? "text-primary" : "text-destructive")}>
                                                         {diff >= 0 ? "+" : ""}{formatCurrencyCode(diff, displayCurrency)} vs meta
                                                     </p>
                                                 )}
@@ -395,36 +388,36 @@ export default function Projected() {
                         </div>
                     ) : (
                         /* ── Mes actual: proyectado es primario, real es "ya acumulado" ── */
-                        <div className="grid grid-cols-3 gap-3">
-                            <Card><CardContent className="p-4">
-                                <p className="text-xs text-muted-foreground mb-1.5">Ingresos esperados</p>
+                        <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                            <Card><CardContent className="p-2 sm:p-4">
+                                <p className="text-[10px] sm:text-xs text-muted-foreground mb-1 sm:mb-1.5">Ingresos esp.</p>
                                 <CurrencyLines byC={projIncomeByC} total={projIncome} colorClass="text-primary" />
                                 {realIncome > 0 && (
-                                    <div className="mt-2 pt-2 border-t border-border/40 space-y-0.5">
+                                    <div className="mt-1.5 sm:mt-2 pt-1.5 sm:pt-2 border-t border-border/40 space-y-0.5">
                                         <p className="text-[10px] text-muted-foreground">Ya ingresado</p>
                                         <CurrencyLines byC={realIncomeByC} total={realIncome} colorClass="text-muted-foreground" />
                                     </div>
                                 )}
                             </CardContent></Card>
-                            <Card><CardContent className="p-4">
-                                <p className="text-xs text-muted-foreground mb-1.5">Gastos esperados</p>
+                            <Card><CardContent className="p-2 sm:p-4">
+                                <p className="text-[10px] sm:text-xs text-muted-foreground mb-1 sm:mb-1.5">Gastos esp.</p>
                                 <CurrencyLines byC={projExpenseByC} total={projExpense} colorClass="text-destructive" />
                                 {realExpense > 0 && (
-                                    <div className="mt-2 pt-2 border-t border-border/40 space-y-0.5">
+                                    <div className="mt-1.5 sm:mt-2 pt-1.5 sm:pt-2 border-t border-border/40 space-y-0.5">
                                         <p className="text-[10px] text-muted-foreground">Ya gastado</p>
                                         <CurrencyLines byC={realExpenseByC} total={realExpense} colorClass="text-muted-foreground" />
                                     </div>
                                 )}
                             </CardContent></Card>
-                            <Card><CardContent className="p-4">
-                                <p className="text-xs text-muted-foreground mb-1.5">Ahorro esperado</p>
-                                <p className={cn("text-sm font-semibold", projSavings >= 0 ? "text-primary" : "text-destructive")}>
+                            <Card><CardContent className="p-2 sm:p-4">
+                                <p className="text-[10px] sm:text-xs text-muted-foreground mb-1 sm:mb-1.5">Ahorro esp.</p>
+                                <p className={cn("text-xs sm:text-sm font-semibold break-all", projSavings >= 0 ? "text-primary" : "text-destructive")}>
                                     {formatCurrencyCode(projSavings, displayCurrency)}
                                 </p>
                                 {realSavings !== 0 && (
-                                    <div className="mt-2 pt-2 border-t border-border/40 space-y-0.5">
+                                    <div className="mt-1.5 sm:mt-2 pt-1.5 sm:pt-2 border-t border-border/40 space-y-0.5">
                                         <p className="text-[10px] text-muted-foreground">Hasta hoy</p>
-                                        <p className={cn("text-xs font-medium", realSavings >= 0 ? "text-muted-foreground" : "text-destructive/70")}>
+                                        <p className={cn("text-xs font-medium break-all", realSavings >= 0 ? "text-muted-foreground" : "text-destructive/70")}>
                                             {formatCurrencyCode(realSavings, displayCurrency)}
                                         </p>
                                     </div>
@@ -496,7 +489,7 @@ export default function Projected() {
 
                     <Card className="overflow-hidden">
                         {/* Header */}
-                        <div className="grid grid-cols-[2.5rem_1fr_1fr_1.25rem] gap-2 px-4 py-2 border-b bg-muted/30 text-xs text-muted-foreground font-medium">
+                        <div className="grid grid-cols-[2rem_1fr_1fr_1rem] sm:grid-cols-[2.5rem_1fr_1fr_1.25rem] gap-1 sm:gap-2 px-3 sm:px-4 py-2 border-b bg-muted/30 text-[10px] sm:text-xs text-muted-foreground font-medium">
                             <span></span>
                             <span className="text-right">Del mes</span>
                             <span className="text-right">Ahorro total</span>
@@ -509,15 +502,13 @@ export default function Projected() {
                                 const isEstimated = isFutureM || isCurrentM;
                                 const monthlySavings = isEstimated ? projSavings : realSavings;
                                 const accBalance = getBalanceAtMonth(yyyymm);
-                                const isExpanded = expandedMonths.has(yyyymm);
                                 const hasData = realIncome > 0 || realExpense > 0 || projSavings !== 0;
                                 return (
                                     <div key={yyyymm} className={cn(isCurrentM && "bg-primary/5")}>
-                                        <div className="grid grid-cols-[2.5rem_1fr_1fr_1.25rem] gap-2 items-center px-4 py-2.5 cursor-pointer hover:bg-muted/20 select-none"
-                                            onClick={() => hasData && toggleMonth(yyyymm)}>
-                                            <span className={cn("text-xs font-medium", isCurrentM ? "text-primary font-bold" : "text-muted-foreground")}>{monthName}</span>
-                                            {/* Del mes */}
-                                            <span className={cn("text-right text-sm font-semibold",
+                                        <div className="grid grid-cols-[2rem_1fr_1fr_1rem] sm:grid-cols-[2.5rem_1fr_1fr_1.25rem] gap-1 sm:gap-2 items-center px-3 sm:px-4 py-2.5 cursor-pointer hover:bg-muted/20 select-none"
+                                            onClick={() => { setSelectedMonth(yyyymm); setView("monthly"); }}>
+                                            <span className={cn("text-xs font-medium shrink-0", isCurrentM ? "text-primary font-bold" : "text-muted-foreground")}>{monthName}</span>
+                                            <span className={cn("text-right text-xs sm:text-sm font-semibold min-w-0 overflow-hidden",
                                                 !hasData ? "text-muted-foreground/30"
                                                     : isEstimated ? "text-muted-foreground/70 italic"
                                                         : monthlySavings >= 0 ? "text-primary" : "text-destructive")}>
@@ -526,48 +517,26 @@ export default function Projected() {
                                                         : isEstimated ? "—"
                                                             : formatCurrencyCode(realSavings, displayCurrency)}
                                             </span>
-                                            {/* Ahorro total acumulado */}
-                                            <span className={cn("text-right text-sm font-bold",
+                                            <span className={cn("text-right text-xs sm:text-sm font-bold min-w-0 overflow-hidden",
                                                 accBalance >= 0 ? (isEstimated ? "text-primary/70" : "text-primary") : (isEstimated ? "text-destructive/70" : "text-destructive"))}>
                                                 {isEstimated ? `≈ ${formatCurrencyCode(accBalance, displayCurrency)}` : formatCurrencyCode(accBalance, displayCurrency)}
                                             </span>
-                                            {hasData
-                                                ? <ChevronDown className={cn("h-3.5 w-3.5 text-muted-foreground shrink-0 transition-transform", isExpanded && "rotate-180")} />
-                                                : <span />}
+                                            <ChevronRight className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-muted-foreground/40 shrink-0" />
                                         </div>
-                                        {isExpanded && (
-                                            <div className="px-4 pb-3 space-y-1.5 bg-muted/10 border-t border-border/40">
-                                                <div className="flex justify-between text-xs pt-2">
-                                                    <span className="text-muted-foreground">Ingresos</span>
-                                                    <span className="text-primary font-medium">{formatCurrencyCode(isFutureM ? 0 : realIncome, displayCurrency)}</span>
-                                                </div>
-                                                <div className="flex justify-between text-xs">
-                                                    <span className="text-muted-foreground">Gastos</span>
-                                                    <span className="text-destructive font-medium">{formatCurrencyCode(isFutureM ? 0 : realExpense, displayCurrency)}</span>
-                                                </div>
-                                                <div className="flex justify-between text-xs border-t border-border/40 pt-1.5">
-                                                    <button className="text-muted-foreground underline-offset-2 hover:underline"
-                                                        onClick={(e) => { e.stopPropagation(); setSelectedMonth(yyyymm); setView("monthly"); }}>
-                                                        Ver detalle →
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        )}
                                     </div>
                                 );
                             })}
                         </div>
-                        {/* Total row */}
-                        <div className="grid grid-cols-[2.5rem_1fr_1fr_1.25rem] gap-2 items-center px-4 py-3 bg-muted/30 border-t-2">
+                        <div className="grid grid-cols-[2rem_1fr_1fr_1rem] sm:grid-cols-[2.5rem_1fr_1fr_1.25rem] gap-1 sm:gap-2 items-center px-3 sm:px-4 py-3 bg-muted/30 border-t-2">
                             <span className="text-xs font-bold text-muted-foreground">Total</span>
                             <span />
-                            <span className={cn("text-right text-sm font-bold", getBalanceAtMonth(`${selectedYear}-12`) >= 0 ? "text-primary" : "text-destructive")}>
+                            <span className={cn("text-right text-xs sm:text-sm font-bold min-w-0 overflow-hidden", getBalanceAtMonth(`${selectedYear}-12`) >= 0 ? "text-primary" : "text-destructive")}>
                                 {formatCurrencyCode(getBalanceAtMonth(`${selectedYear}-12`), displayCurrency)}
                             </span>
                             <span />
                         </div>
                     </Card>
-                    <p className="text-xs text-muted-foreground text-center">Expandí cada mes para ver el desglose.</p>
+                    <p className="text-xs text-muted-foreground text-center">Tocá un mes para ver el detalle.</p>
                 </div>
             )}
 

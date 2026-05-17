@@ -14,12 +14,14 @@ export default function Register() {
     const [password, setPassword] = useState("");
     const [confirmPassword, setConfirmPassword] = useState("");
     const [otp, setOtp] = useState("");
+    const [registerCode, setRegisterCode] = useState("");
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(false);
 
     const handleRegister = async (e) => {
         e.preventDefault();
         setError("");
+        if (registerCode !== import.meta.env.VITE_REGISTER_CODE) { setError("Código de acceso incorrecto"); return; }
         if (password !== confirmPassword) { setError("Las contraseñas no coinciden"); return; }
         setLoading(true);
         try {
@@ -71,6 +73,7 @@ export default function Register() {
                     {step === "register" ? (
                         <>
                             <form onSubmit={handleRegister} className="space-y-3">
+                                <div><Label>Código de acceso</Label><Input type="password" value={registerCode} onChange={(e) => setRegisterCode(e.target.value)} placeholder="Solicitalo al administrador" required /></div>
                                 <div><Label>Correo electrónico</Label><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required /></div>
                                 <div><Label>Contraseña</Label><Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required /></div>
                                 <div><Label>Confirmar contraseña</Label><Input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required /></div>
