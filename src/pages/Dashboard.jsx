@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, Link } from "react-router-dom";
@@ -26,6 +26,7 @@ const typeConfig = {
 export default function Dashboard() {
     const navigate = useNavigate();
     const { displayCurrency, convert } = useCurrency();
+    const [dashAccTab, setDashAccTab] = useState(null); // null = auto-selecciona primer favorito
 
     const { data: transactions = [], isLoading: loadingTx } = useQuery({
         queryKey: ["transactions"],
@@ -56,7 +57,6 @@ export default function Dashboard() {
     const hour = new Date().getHours();
     const greeting = hour < 12 ? "Buenos días" : hour < 18 ? "Buenas tardes" : "Buenas noches";
 
-    // Confirmed real transactions this month (no future, no projected)
     const monthlyTx = useMemo(() =>
         transactions.filter((t) =>
             t.date?.startsWith(currentMonth) && t.date <= TODAY && t.status !== "projected"
@@ -72,7 +72,6 @@ export default function Dashboard() {
 
     const netMonth = monthlyIncome - monthlyExpense;
 
-    // Effective balance per account
     function computeEffective(acc) {
         return transactions
             .filter((tx) => tx.status !== "projected" && tx.date && tx.date <= TODAY)
@@ -82,7 +81,7 @@ export default function Dashboard() {
                     if (tx.type === "expense") return sum - (tx.amount || 0);
                     if (tx.type === "transfer") return sum - (tx.amount || 0);
                 }
-                if (tx.to_account_id === acc.id && tx.type === "transfer") return sum + (tx.amount || 0);
+                if (tx.to_account_id === acc.id && tx.type === "transfer") return sum + (tx.to_amount || tx.amount || 0);
                 return sum;
             }, acc.balance || 0);
     }
@@ -100,21 +99,27 @@ export default function Dashboard() {
 
     const totalSavings = liquidBalance + investedTotal;
 
-    // Recent transactions — confirmed, real, most recent first
     const recentTx = useMemo(() =>
         transactions
             .filter((t) => t.status !== "projected" && t.date && t.date <= TODAY)
             .slice(0, 8),
         [transactions]);
 
-    // Favorite accounts
     const favoriteAccounts = useMemo(() =>
         accounts
-            .filter((a) => a.is_favorite)
+            .filter((a) => a.is_favorite && a.is_visible !== false)
             .sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999)),
         [accounts]);
 
-    // Budgets current month
+    // null = auto-selecciona primer favorito (sort_order más bajo)
+    const effectiveDashTab = dashAccTab ?? favoriteAccounts[0]?.id ?? "all";
+    const activeDashAcc = effectiveDashTab !== "all" ? accounts.find(a => a.id === effectiveDashTab) : null;
+    const activeDashBalance = activeDashAcc ? computeEffective(activeDashAcc) : null;
+
+    const mobileTx = effectiveDashTab === "all"
+        ? recentTx
+        : recentTx.filter(t => t.account_id === effectiveDashTab || t.to_account_id === effectiveDashTab);
+
     const monthBudgets = useMemo(() =>
         budgets.filter((b) => b.month === currentMonth).slice(0, 6),
         [budgets, currentMonth]);
@@ -187,7 +192,7 @@ export default function Dashboard() {
     return (
         <div className="space-y-4">
 
-            {/* ── Mobile header: greeting + quick add + recent transactions ── */}
+            {/* ── Mobile header ── */}
             <div className="lg:hidden space-y-3">
                 <div className="flex items-center justify-between">
                     <div>
@@ -201,19 +206,77 @@ export default function Dashboard() {
                     </Button>
                 </div>
 
-                {/* Recent transactions — mobile top */}
+                {/* Cuentas + últimas transacciones — un solo bloque */}
                 <Card className="overflow-hidden">
-                    <div className="flex items-center justify-between px-4 pt-3 pb-2">
+                    {/* Tabs de cuentas */}
+                    {favoriteAccounts.length > 0 && (
+                        <div className="px-4 pt-3 pb-2 space-y-2.5">
+                            <div className="flex gap-1.5 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+                                <button
+                                    onClick={() => setDashAccTab("all")}
+                                    className={cn(
+                                        "px-3 py-1.5 text-xs font-medium rounded-full whitespace-nowrap shrink-0 transition-colors",
+                                        effectiveDashTab === "all"
+                                            ? "bg-primary text-primary-foreground"
+                                            : "bg-muted text-muted-foreground hover:text-foreground"
+                                    )}
+                                >
+                                    Todas
+                                </button>
+                                {favoriteAccounts.map(acc => (
+                                    <button
+                                        key={acc.id}
+                                        onClick={() => setDashAccTab(acc.id)}
+                                        className={cn(
+                                            "px-3 py-1.5 text-xs font-medium rounded-full whitespace-nowrap shrink-0 transition-colors",
+                                            effectiveDashTab === acc.id
+                                                ? "bg-primary text-primary-foreground"
+                                                : "bg-muted text-muted-foreground hover:text-foreground"
+                                        )}
+                                    >
+                                        {acc.name}
+                                    </button>
+                                ))}
+                            </div>
+                            <div>
+                                {effectiveDashTab === "all" ? (
+                                    <>
+                                        <p className="text-xs text-muted-foreground">Total cuentas</p>
+                                        <p className={cn("text-2xl font-bold", liquidBalance < 0 ? "text-destructive" : "text-foreground")}>
+                                            {formatCurrencyCode(liquidBalance, displayCurrency)}
+                                        </p>
+                                    </>
+                                ) : activeDashAcc && (
+                                    <>
+                                        <p className="text-xs text-muted-foreground">{activeDashAcc.name}</p>
+                                        <p className={cn("text-2xl font-bold", activeDashBalance < 0 ? "text-destructive" : "text-foreground")}>
+                                            {formatCurrencyCode(activeDashBalance, activeDashAcc.currency || "MXN")}
+                                        </p>
+                                        {(activeDashAcc.currency || "MXN") !== displayCurrency && (
+                                            <p className="text-xs text-muted-foreground">
+                                                ≈ {formatCurrencyCode(convert(activeDashBalance, activeDashAcc.currency || "MXN"), displayCurrency)}
+                                            </p>
+                                        )}
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Últimas transacciones */}
+                    <div className="flex items-center justify-between px-4 pt-2 pb-2 border-t">
                         <p className="text-sm font-semibold">Últimas transacciones</p>
                         <Link to="/transactions" className="text-xs text-primary flex items-center gap-0.5">
                             Ver todas <ChevronRight className="h-3.5 w-3.5" />
                         </Link>
                     </div>
-                    {recentTx.length === 0 ? (
-                        <p className="text-sm text-muted-foreground px-4 pb-4">No hay transacciones aún.</p>
+                    {mobileTx.length === 0 ? (
+                        <p className="text-sm text-muted-foreground px-4 pb-4">
+                            {effectiveDashTab === "all" ? "No hay transacciones aún." : "Sin transacciones en esta cuenta."}
+                        </p>
                     ) : (
                         <div className="divide-y">
-                            {recentTx.slice(0, 5).map((tx) => <TxRow key={tx.id} tx={tx} compact />)}
+                            {mobileTx.slice(0, 5).map((tx) => <TxRow key={tx.id} tx={tx} compact />)}
                         </div>
                     )}
                     <div className="px-4 py-2 border-t">
@@ -239,7 +302,7 @@ export default function Dashboard() {
                 </div>
             </div>
 
-            {/* ── Stats — hidden on mobile ── */}
+            {/* ── Stats — solo desktop ── */}
             <TooltipProvider delayDuration={100}>
                 <div className="hidden lg:grid grid-cols-4 gap-3">
                     {[
@@ -278,14 +341,14 @@ export default function Dashboard() {
                 </div>
             </TooltipProvider>
 
-            {/* ── Favorite accounts ── */}
+            {/* ── Cuentas favoritas — solo desktop ── */}
             {favoriteAccounts.length > 0 && (
-                <div className="space-y-2">
+                <div className="hidden lg:block space-y-2">
                     <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
                         <Star className="h-3.5 w-3.5 fill-current text-chart-3" />
                         Cuentas favoritas
                     </p>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+                    <div className="grid grid-cols-4 gap-2">
                         {favoriteAccounts.map((acc) => {
                             const effective = computeEffective(acc);
                             return (
@@ -308,7 +371,7 @@ export default function Dashboard() {
                 </div>
             )}
 
-            {/* ── Budget — visible on mobile + inside desktop grid ── */}
+            {/* ── Budget ── */}
             {(() => {
                 const budgetCard = (
                     <Card>
@@ -350,10 +413,7 @@ export default function Dashboard() {
                 );
                 return (
                     <>
-                        {/* Mobile: budget below favorite accounts */}
                         <div className="lg:hidden">{budgetCard}</div>
-
-                        {/* Desktop: chart (2/3) + budget (1/3) side by side */}
                         <div className="hidden lg:grid grid-cols-3 gap-4">
                             <div className="col-span-2">
                                 <SpendingChart
@@ -369,7 +429,7 @@ export default function Dashboard() {
                 );
             })()}
 
-            {/* ── Recent transactions — desktop only (mobile shows at top) ── */}
+            {/* ── Transacciones recientes — solo desktop ── */}
             <Card className="hidden lg:block overflow-hidden">
                 <div className="flex items-center justify-between px-6 pt-4 pb-3">
                     <p className="font-semibold">Transacciones recientes</p>

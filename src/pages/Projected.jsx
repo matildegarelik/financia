@@ -100,7 +100,7 @@ export default function Projected() {
                         if (tx.type === "expense") return s - (tx.amount || 0);
                         if (tx.type === "transfer") return s - (tx.amount || 0);
                     }
-                    if (tx.to_account_id === acc.id && tx.type === "transfer") return s + (tx.amount || 0);
+                    if (tx.to_account_id === acc.id && tx.type === "transfer") return s + (tx.to_amount || tx.amount || 0);
                     return s;
                 }, acc.balance || 0);
             return sum + convert(eff, acc.currency || "MXN");

@@ -17,6 +17,22 @@ const createEntityClient = (tableName) => ({
         if (error) throw error;
         return data || [];
     },
+    listPaginated: async (applyFilters, page = 1, pageSize = 50) => {
+        let q = supabase.from(tableName).select('*', { count: 'exact' });
+        if (applyFilters) q = applyFilters(q);
+        const from = (page - 1) * pageSize;
+        q = q.range(from, from + pageSize - 1);
+        const { data, error, count } = await q;
+        if (error) throw error;
+        return { data: data || [], count: count ?? 0 };
+    },
+    listForSubtotal: async (applyFilters) => {
+        let q = supabase.from(tableName).select('type,amount,currency');
+        if (applyFilters) q = applyFilters(q);
+        const { data, error } = await q;
+        if (error) throw error;
+        return data || [];
+    },
     create: async (data) => {
         const { data: row, error } = await supabase.from(tableName).insert(data).select().single();
         if (error) throw error;

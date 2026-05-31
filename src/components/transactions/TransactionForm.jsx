@@ -16,16 +16,22 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
     useEffect(() => { setForm(getDefault(initial)); setShowExtra(false); }, [initial, open]);
 
     function getDefault(init) {
+        const defaultAcc = !init
+            ? accounts
+                .filter(a => a.is_visible !== false && a.is_favorite)
+                .sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999))[0]
+            : null;
         return {
             type: "expense",
             status: "confirmed",
             amount: "",
-            currency: activeCurrencies[0] || "ARS",
+            amount_gross: "",
+            currency: defaultAcc?.currency || activeCurrencies[0] || "ARS",
             description: "",
             category_id: "",
             category_name: "",
-            account_id: "",
-            account_name: "",
+            account_id: defaultAcc?.id || "",
+            account_name: defaultAcc?.name || "",
             to_account_id: "",
             to_account_name: "",
             date: new Date().toISOString().split("T")[0],
@@ -38,7 +44,7 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
             installment_total: "",
             installment_current: "",
             probability: 80,
-            ...(init ? { ...init, amount: String(init.amount || "") } : {}),
+            ...(init ? { ...init, amount: String(init.amount || ""), amount_gross: String(init.amount_gross || "") } : {}),
         };
     }
 
@@ -64,9 +70,12 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
 
     const handleSubmit = (e) => {
         e.preventDefault();
+        const net = parseFloat(form.amount) || 0;
+        const gross = parseFloat(form.amount_gross);
         onSubmit({
             ...form,
-            amount: parseFloat(form.amount) || 0,
+            amount: net,
+            amount_gross: !isNaN(gross) && gross !== net ? gross : null,
             installment_total: form.installment_total ? parseInt(form.installment_total) : null,
             installment_current: form.installment_current ? parseInt(form.installment_current) : null,
             probability: form.probability ? parseInt(form.probability) : null,
@@ -95,7 +104,9 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
         .filter((c) => !catParents.find((p) => p.id === c.parent_category))
         .forEach((c) => orderedCats.push({ ...c, isParent: false }));
 
-    const sortedAccounts = [...accounts].sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999));
+    const sortedAccounts = accounts
+        .filter(a => a.is_visible !== false)
+        .sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999));
 
     const isFreelance = form.project_name || form.client_name;
 
@@ -150,13 +161,21 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
                     {/* Amount — divisa heredada de la cuenta */}
                     <div className="grid grid-cols-3 gap-2 items-end">
                         <div className="col-span-2">
-                            <Label>Monto</Label>
+                            <Label>Monto neto</Label>
                             <Input type="number" step="0.01" placeholder="0.00" value={form.amount}
                                 onChange={(e) => set("amount", e.target.value)} required />
                         </div>
                         <div className="h-9 flex items-center justify-center rounded-md border border-input bg-muted/40 px-3 text-sm font-mono font-semibold text-muted-foreground">
                             {form.currency || "—"}
                         </div>
+                    </div>
+
+                    {/* Monto bruto — solo desktop */}
+                    <div className="hidden md:block">
+                        <Label>Monto bruto <span className="text-xs text-muted-foreground font-normal">(antes de comisión, opcional)</span></Label>
+                        <Input type="number" step="0.01" placeholder={form.amount || "0.00"}
+                            value={form.amount_gross}
+                            onChange={(e) => set("amount_gross", e.target.value)} />
                     </div>
 
                     <div>

@@ -83,7 +83,7 @@ export default function Settings() {
                     if (tx.type === "expense") return sum - (tx.amount || 0);
                     if (tx.type === "transfer") return sum - (tx.amount || 0);
                 }
-                if (tx.to_account_id === acc.id && tx.type === "transfer") return sum + (tx.amount || 0);
+                if (tx.to_account_id === acc.id && tx.type === "transfer") return sum + (tx.to_amount || tx.amount || 0);
                 return sum;
             }, acc.balance || 0);
     }

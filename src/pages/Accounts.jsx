@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Wallet, CreditCard, Banknote, PiggyBank, TrendingUp, MoreHorizontal, Trash2, Pencil, Lock, Bitcoin, Star, ChevronUp, ChevronDown, GripVertical, Info } from "lucide-react";
+import { Plus, Wallet, CreditCard, Banknote, PiggyBank, TrendingUp, MoreHorizontal, Trash2, Pencil, Lock, Bitcoin, Star, ChevronUp, ChevronDown, GripVertical, Info, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -55,7 +55,7 @@ export default function Accounts() {
                     if (tx.type === "transfer") return sum - (tx.amount || 0);
                 }
                 if (tx.to_account_id === acc.id && tx.type === "transfer") {
-                    return sum + (tx.amount || 0);
+                    return sum + (tx.to_amount || tx.amount || 0);
                 }
                 return sum;
             }, initial);
@@ -98,6 +98,10 @@ export default function Accounts() {
 
     const toggleFavorite = (acc) => {
         updateMut.mutate({ id: acc.id, data: { is_favorite: !acc.is_favorite } });
+    };
+
+    const toggleVisible = (acc) => {
+        updateMut.mutate({ id: acc.id, data: { is_visible: acc.is_visible === false ? true : false } });
     };
 
     const moveAccount = (idx, dir) => {
@@ -207,6 +211,7 @@ export default function Accounts() {
                         convert={convert}
                         onEdit={() => setEditing(acc)}
                         onFavorite={() => toggleFavorite(acc)}
+                        onToggleVisible={() => toggleVisible(acc)}
                         onMoveUp={() => moveAccount(i, -1)}
                         onMoveDown={() => moveAccount(i, 1)}
                         onDelete={() => deleteMut.mutate(acc.id)}
@@ -220,7 +225,7 @@ export default function Accounts() {
     );
 }
 
-function SortableAccountCard({ acc, i, totalCount, investments, computeEffectiveBalance, displayCurrency, convert, onEdit, onFavorite, onMoveUp, onMoveDown, onDelete }) {
+function SortableAccountCard({ acc, i, totalCount, investments, computeEffectiveBalance, displayCurrency, convert, onEdit, onFavorite, onToggleVisible, onMoveUp, onMoveDown, onDelete }) {
     const dragControls = useDragControls();
     const Icon = iconMap[acc.type] || Wallet;
     const isInvestment = acc.type === "investment";
@@ -228,9 +233,11 @@ function SortableAccountCard({ acc, i, totalCount, investments, computeEffective
     const linkedInvs = investments.filter((inv) => inv.account_id === acc.id && (!inv.status || inv.status === "activa"));
     const investedAmt = linkedInvs.reduce((s, inv) => s + (inv.current_value || inv.amount_invested || 0), 0);
 
+    const isHidden = acc.is_visible === false;
+
     return (
         <Reorder.Item value={acc} as="div" dragControls={dragControls} dragListener={false}>
-            <Card className={cn("relative group hover:shadow-lg transition-shadow", isInvestment && "border-chart-2/30")}>
+            <Card className={cn("relative group hover:shadow-lg transition-shadow", isInvestment && "border-chart-2/30", isHidden && "opacity-60")}>
                 <CardContent className="p-5">
                     <div className="flex items-start justify-between">
                         <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -247,6 +254,7 @@ function SortableAccountCard({ acc, i, totalCount, investments, computeEffective
                                 <div className="flex items-center gap-1.5">
                                     <p className="font-semibold text-sm truncate">{acc.name}</p>
                                     {acc.is_favorite && <Star className="h-3 w-3 text-chart-3 fill-chart-3 shrink-0" />}
+                                    {isHidden && <EyeOff className="h-3 w-3 text-muted-foreground shrink-0" />}
                                 </div>
                                 <div className="flex items-center gap-1.5 mt-0.5">
                                     <Badge variant="secondary" className="text-xs">{ACCOUNT_TYPES[acc.type]}</Badge>
@@ -263,6 +271,12 @@ function SortableAccountCard({ acc, i, totalCount, investments, computeEffective
                                 <DropdownMenuItem onClick={onFavorite}>
                                     <Star className={cn("h-4 w-4 mr-2", acc.is_favorite ? "fill-chart-3 text-chart-3" : "")} />
                                     {acc.is_favorite ? "Quitar de favoritas" : "Marcar como favorita"}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={onToggleVisible}>
+                                    {isHidden
+                                        ? <><Eye className="h-4 w-4 mr-2" />Mostrar en filtros</>
+                                        : <><EyeOff className="h-4 w-4 mr-2" />Ocultar de filtros</>
+                                    }
                                 </DropdownMenuItem>
                                 <DropdownMenuItem onClick={onMoveUp} disabled={i === 0}>
                                     <ChevronUp className="h-4 w-4 mr-2" />Subir
