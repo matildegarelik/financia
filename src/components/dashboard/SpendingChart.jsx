@@ -1,7 +1,7 @@
 import React, { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
-import { formatCurrencyCode } from "@/lib/formatters";
+import { formatCurrencyCode, isRegularExpense } from "@/lib/formatters";
 
 const COLORS = ["#27b088", "#3b82f6", "#f59e0b", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316", "#ef4444"];
 
@@ -9,7 +9,7 @@ export default function SpendingChart({ transactions = [], convert, displayCurre
     const data = useMemo(() => {
         const byCategory = {};
         transactions
-            .filter((t) => t.type === "expense")
+            .filter(isRegularExpense)
             .forEach((t) => {
                 const key = t.category_name || "Sin categoría";
                 byCategory[key] = (byCategory[key] || 0) + (convert ? convert(t.amount || 0, t.currency || "MXN") : (t.amount || 0));

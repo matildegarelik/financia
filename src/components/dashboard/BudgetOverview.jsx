@@ -1,7 +1,7 @@
 import React from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { formatCurrencyCode, getCurrentMonth } from "@/lib/formatters";
+import { formatCurrencyCode, getCurrentMonth, isRegularExpense } from "@/lib/formatters";
 import { Link } from "react-router-dom";
 import { format, startOfMonth, endOfMonth } from "date-fns";
 
@@ -18,7 +18,7 @@ export default function BudgetOverview({ budgets, transactions = [] }) {
     const getSpent = (b) =>
         transactions
             .filter((tx) => {
-                if (tx.type !== "expense" || tx.status === "projected") return false;
+                if (!isRegularExpense(tx) || tx.status === "projected") return false;
                 if (!tx.date || tx.date < monthStart || tx.date > monthEnd) return false;
                 if (b.category_id && tx.category_id === b.category_id) return true;
                 if (!b.category_id && b.category_name && tx.category_name === b.category_name) return true;

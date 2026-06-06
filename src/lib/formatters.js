@@ -100,3 +100,5 @@ export const TRANSACTION_STATUS = {
 };
 
 export const TODAY = new Date().toISOString().split("T")[0];
+
+export const isRegularExpense = (tx) => tx.type === "expense" && !tx.is_investment_transfer;

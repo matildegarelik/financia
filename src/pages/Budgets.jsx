@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import PageHeader from "@/components/shared/PageHeader";
-import { formatCurrency, formatCurrencyCode } from "@/lib/formatters";
+import { formatCurrency, formatCurrencyCode, isRegularExpense } from "@/lib/formatters";
 import { useCurrency } from "@/lib/currency-context";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
@@ -52,12 +52,14 @@ export default function Budgets() {
         return ids;
     };
 
-    // Calculate spent from real transactions for this month
-    const getBudgetSpent = (budget) => {
+    // Calculate actual amount for a budget (spent for expense budgets, received for income budgets)
+    const getBudgetProgress = (budget) => {
+        const cat = categories.find((c) => c.id === budget.category_id);
+        const isIncome = cat?.type === "income";
         const matchIds = getMatchingCategoryIds(budget);
         return transactions
             .filter((tx) => {
-                if (tx.type !== "expense") return false;
+                if (isIncome ? tx.type !== "income" : !isRegularExpense(tx)) return false;
                 if (!tx.date) return false;
                 if (tx.date < monthStart || tx.date > monthEnd) return false;
                 if (tx.status === "projected") return false;
@@ -94,8 +96,10 @@ export default function Budgets() {
         toast.success(`${prevBudgets.length} presupuestos copiados`);
     };
 
-    const totalBudget = budgets.reduce((s, b) => s + convert(b.amount || 0, b.currency || "MXN"), 0);
-    const totalSpent = budgets.reduce((s, b) => s + convert(getBudgetSpent(b), b.currency || "MXN"), 0);
+    const expBudgets = budgets.filter((b) => categories.find((c) => c.id === b.category_id)?.type !== "income");
+    const incBudgets = budgets.filter((b) => categories.find((c) => c.id === b.category_id)?.type === "income");
+    const totalBudget = expBudgets.reduce((s, b) => s + convert(b.amount || 0, b.currency || "MXN"), 0);
+    const totalSpent = expBudgets.reduce((s, b) => s + convert(getBudgetProgress(b), b.currency || "MXN"), 0);
     const isCurrentMonth = monthKey === toMonthKey(new Date());
 
     return (
@@ -130,8 +134,8 @@ export default function Budgets() {
                 </Button>
             </div>
 
-            {/* Summary bar */}
-            {budgets.length > 0 && (
+            {/* Summary bar — expense budgets only */}
+            {expBudgets.length > 0 && (
                 <Card>
                     <CardContent className="p-4">
                         <div className="flex justify-between text-sm mb-2">
@@ -169,44 +173,89 @@ export default function Budgets() {
                     </div>
                 </div>
             ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {budgets.map((b, i) => {
-                        const spent = getBudgetSpent(b);
-                        const pct = b.amount > 0 ? Math.min((spent / b.amount) * 100, 100) : 0;
-                        const over = spent > b.amount;
-                        const remaining = b.amount - spent;
-                        return (
-                            <motion.div key={b.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
-                                <Card className="hover:shadow-lg transition-shadow">
-                                    <CardContent className="p-5 space-y-3">
-                                        <div className="flex items-center justify-between">
-                                            <div className="min-w-0">
-                                                <p className="font-semibold truncate">{b.category_name}</p>
-                                                {b.category_id && (() => {
-                                                    const childCount = categories.filter((c) => c.parent_category === b.category_id).length;
-                                                    return childCount > 0
-                                                        ? <p className="text-xs text-muted-foreground">incluye {childCount} subcategoría{childCount > 1 ? "s" : ""}</p>
-                                                        : null;
-                                                })()}
-                                            </div>
-                                            <div className="flex gap-1 shrink-0">
-                                                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditing(b)}><Pencil className="h-3.5 w-3.5" /></Button>
-                                                <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => deleteMut.mutate(b.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
-                                            </div>
-                                        </div>
-                                        <Progress value={pct} className={cn(over ? "[&>div]:bg-destructive" : pct > 80 ? "[&>div]:bg-yellow-500" : "[&>div]:bg-primary")} />
-                                        <div className="flex justify-between text-sm">
-                                            <span className="text-muted-foreground">{formatCurrencyCode(spent, b.currency || "MXN")} gastado</span>
-                                            <span className={cn("font-medium", over ? "text-destructive" : "text-primary")}>
-                                                {over ? `Excedido ${formatCurrencyCode(Math.abs(remaining), b.currency || "MXN")}` : `${formatCurrencyCode(remaining, b.currency || "MXN")} restante`}
-                                            </span>
-                                        </div>
-                                        <p className="text-xs text-muted-foreground text-right">{pct.toFixed(0)}% de {formatCurrencyCode(b.amount, b.currency || "MXN")}</p>
-                                    </CardContent>
-                                </Card>
-                            </motion.div>
-                        );
-                    })}
+                <div className="space-y-5">
+                    {expBudgets.length > 0 && (
+                        <div className="space-y-3">
+                            {budgets.length !== expBudgets.length && (
+                                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Gastos</p>
+                            )}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                                {expBudgets.map((b, i) => {
+                                    const progress = getBudgetProgress(b);
+                                    const pct = b.amount > 0 ? Math.min((progress / b.amount) * 100, 100) : 0;
+                                    const over = progress > b.amount;
+                                    const remaining = b.amount - progress;
+                                    return (
+                                        <motion.div key={b.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
+                                            <Card className="hover:shadow-lg transition-shadow">
+                                                <CardContent className="p-5 space-y-3">
+                                                    <div className="flex items-center justify-between">
+                                                        <div className="min-w-0">
+                                                            <p className="font-semibold truncate">{b.category_name}</p>
+                                                            {b.category_id && (() => {
+                                                                const childCount = categories.filter((c) => c.parent_category === b.category_id).length;
+                                                                return childCount > 0
+                                                                    ? <p className="text-xs text-muted-foreground">incluye {childCount} subcategoría{childCount > 1 ? "s" : ""}</p>
+                                                                    : null;
+                                                            })()}
+                                                        </div>
+                                                        <div className="flex gap-1 shrink-0">
+                                                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditing(b)}><Pencil className="h-3.5 w-3.5" /></Button>
+                                                            <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => deleteMut.mutate(b.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                                                        </div>
+                                                    </div>
+                                                    <Progress value={pct} className={cn(over ? "[&>div]:bg-destructive" : pct > 80 ? "[&>div]:bg-yellow-500" : "[&>div]:bg-primary")} />
+                                                    <div className="flex justify-between text-sm">
+                                                        <span className="text-muted-foreground">{formatCurrencyCode(progress, b.currency || "MXN")} gastado</span>
+                                                        <span className={cn("font-medium", over ? "text-destructive" : "text-primary")}>
+                                                            {over ? `Excedido ${formatCurrencyCode(Math.abs(remaining), b.currency || "MXN")}` : `${formatCurrencyCode(remaining, b.currency || "MXN")} restante`}
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-xs text-muted-foreground text-right">{pct.toFixed(0)}% de {formatCurrencyCode(b.amount, b.currency || "MXN")}</p>
+                                                </CardContent>
+                                            </Card>
+                                        </motion.div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
+                    {incBudgets.length > 0 && (
+                        <div className="space-y-3">
+                            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Ingresos esperados</p>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                                {incBudgets.map((b, i) => {
+                                    const received = getBudgetProgress(b);
+                                    const pct = b.amount > 0 ? Math.min((received / b.amount) * 100, 100) : 0;
+                                    const reached = received >= b.amount;
+                                    const remaining = b.amount - received;
+                                    return (
+                                        <motion.div key={b.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
+                                            <Card className="hover:shadow-lg transition-shadow">
+                                                <CardContent className="p-5 space-y-3">
+                                                    <div className="flex items-center justify-between">
+                                                        <p className="font-semibold truncate">{b.category_name}</p>
+                                                        <div className="flex gap-1 shrink-0">
+                                                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditing(b)}><Pencil className="h-3.5 w-3.5" /></Button>
+                                                            <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => deleteMut.mutate(b.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                                                        </div>
+                                                    </div>
+                                                    <Progress value={pct} className="[&>div]:bg-primary" />
+                                                    <div className="flex justify-between text-sm">
+                                                        <span className="text-muted-foreground">{formatCurrencyCode(received, b.currency || "MXN")} recibido</span>
+                                                        <span className={cn("font-medium", reached ? "text-primary" : "text-muted-foreground")}>
+                                                            {reached ? "Meta alcanzada" : `${formatCurrencyCode(remaining, b.currency || "MXN")} por recibir`}
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-xs text-muted-foreground text-right">{pct.toFixed(0)}% de {formatCurrencyCode(b.amount, b.currency || "MXN")}</p>
+                                                </CardContent>
+                                            </Card>
+                                        </motion.div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
 
@@ -214,7 +263,7 @@ export default function Budgets() {
                 open={showForm || !!editing}
                 onClose={() => { setShowForm(false); setEditing(null); }}
                 initial={editing}
-                categories={categories.filter((c) => c.type === "expense")}
+                categories={categories}
                 monthKey={monthKey}
                 onSubmit={(data) => editing ? updateMut.mutate({ id: editing.id, data }) : createMut.mutate({ ...data, month: monthKey })}
             />
@@ -246,7 +295,7 @@ function BudgetFormDialog({ open, onClose, onSubmit, initial, categories, monthK
         orderedCats.push({ ...p, isParent: true });
         children.filter((c) => c.parent_category === p.id).forEach((c) => orderedCats.push({ ...c, isParent: false }));
     });
-    // Orphan children (parent is income type, filtered out)
+    // Orphan children (parent not found in list)
     children.filter((c) => !parents.find((p) => p.id === c.parent_category)).forEach((c) => orderedCats.push({ ...c, isParent: false }));
 
     return (

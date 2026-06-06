@@ -51,6 +51,7 @@ export default function Investments() {
                     account_name: acc?.name || "",
                     description: `Inversión: ${d.name}`,
                     category_name: "Inversión",
+                    is_investment_transfer: true,
                 });
             }
             return inv;

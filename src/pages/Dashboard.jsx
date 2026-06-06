@@ -12,7 +12,7 @@ import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import CurrencySelector from "@/components/shared/CurrencySelector";
 import SpendingChart from "@/components/dashboard/SpendingChart";
-import { formatCurrency, formatCurrencyCode, formatDate, getCurrentMonth, TODAY } from "@/lib/formatters";
+import { formatCurrency, formatCurrencyCode, formatDate, getCurrentMonth, TODAY, isRegularExpense } from "@/lib/formatters";
 import { useCurrency } from "@/lib/currency-context";
 import { cn } from "@/lib/utils";
 import { format as fnsFormat, startOfMonth, endOfMonth } from "date-fns";
@@ -67,7 +67,7 @@ export default function Dashboard() {
         [monthlyTx, convert]);
 
     const monthlyExpense = useMemo(() =>
-        monthlyTx.filter((t) => t.type === "expense").reduce((s, t) => s + convert(t.amount || 0, t.currency || "MXN"), 0),
+        monthlyTx.filter(isRegularExpense).reduce((s, t) => s + convert(t.amount || 0, t.currency || "MXN"), 0),
         [monthlyTx, convert]);
 
     const netMonth = monthlyIncome - monthlyExpense;
@@ -121,8 +121,8 @@ export default function Dashboard() {
         : recentTx.filter(t => t.account_id === effectiveDashTab || t.to_account_id === effectiveDashTab);
 
     const monthBudgets = useMemo(() =>
-        budgets.filter((b) => b.month === currentMonth).slice(0, 6),
-        [budgets, currentMonth]);
+        budgets.filter((b) => b.month === currentMonth && categories.find((c) => c.id === b.category_id)?.type !== "income").slice(0, 6),
+        [budgets, currentMonth, categories]);
 
     const getMatchingCategoryIds = (budget) => {
         if (!budget.category_id) return null;
@@ -135,7 +135,7 @@ export default function Dashboard() {
         const matchIds = getMatchingCategoryIds(b);
         return transactions
             .filter((tx) => {
-                if (tx.type !== "expense" || tx.status === "projected") return false;
+                if (!isRegularExpense(tx) || tx.status === "projected") return false;
                 if (!tx.date || tx.date < monthStart || tx.date > monthEnd) return false;
                 if (matchIds && tx.category_id && matchIds.has(tx.category_id)) return true;
                 if (!matchIds && b.category_name && tx.category_name === b.category_name) return true;

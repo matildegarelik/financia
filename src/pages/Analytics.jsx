@@ -7,7 +7,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import PageHeader from "@/components/shared/PageHeader";
 import CurrencySelector from "@/components/shared/CurrencySelector";
 import { useCurrency } from "@/lib/currency-context";
-import { formatCurrency, getMonthLabel, TODAY } from "@/lib/formatters";
+import { formatCurrency, getMonthLabel, TODAY, isRegularExpense } from "@/lib/formatters";
 import { Skeleton } from "@/components/ui/skeleton";
 
 function getMonthKey(dateStr) {
@@ -37,7 +37,7 @@ export default function Analytics() {
             if (!byMonth[m]) byMonth[m] = { income: 0, expense: 0 };
             const amt = convert(t.amount || 0, t.currency || "MXN");
             if (t.type === "income") byMonth[m].income += amt;
-            else if (t.type === "expense") byMonth[m].expense += amt;
+            else if (isRegularExpense(t)) byMonth[m].expense += amt;
         });
 
         const numMonths = parseInt(months) || 12;
@@ -68,7 +68,7 @@ export default function Analytics() {
 
     // Top categories
     const byCat = useMemo(() => {
-        const past = transactions.filter((t) => t.date <= TODAY && t.type === "expense");
+        const past = transactions.filter((t) => t.date <= TODAY && isRegularExpense(t));
         const map = {};
         past.forEach((t) => {
             const k = t.category_name || "Sin categoría";

@@ -9,7 +9,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import PageHeader from "@/components/shared/PageHeader";
 import CurrencySelector from "@/components/shared/CurrencySelector";
 import TransactionFormProjected from "@/components/transactions/TransactionFormProjected";
-import { formatCurrencyCode, formatDate, getCurrentMonth, getMonthLabel } from "@/lib/formatters";
+import { formatCurrencyCode, formatDate, getCurrentMonth, getMonthLabel, isRegularExpense } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { useCurrency } from "@/lib/currency-context";
 import { toast } from "sonner";
@@ -49,6 +49,7 @@ export default function Projected() {
     const { data: accounts = [] } = useQuery({ queryKey: ["accounts"], queryFn: () => base44.entities.Account.list() });
     const { data: categories = [] } = useQuery({ queryKey: ["categories"], queryFn: () => base44.entities.Category.list() });
     const { data: investments = [] } = useQuery({ queryKey: ["investments"], queryFn: () => base44.entities.Investment.list() });
+    const { data: budgets = [] } = useQuery({ queryKey: ["budgets"], queryFn: () => base44.entities.Budget.list() });
 
     const createMut = useMutation({
         mutationFn: (data) => base44.entities.Transaction.create({ ...data, status: "projected" }),
@@ -86,6 +87,7 @@ export default function Projected() {
 
     const [pastExpanded, setPastExpanded] = useState({});
     const togglePast = (key) => setPastExpanded((p) => ({ ...p, [key]: !p[key] }));
+    const [budgetExpanded, setBudgetExpanded] = useState(false);
 
     // Balance total actual (cuentas líquidas + inversiones activas)
     const todayDate = new Date().toISOString().split("T")[0];
@@ -143,30 +145,50 @@ export default function Projected() {
     }
 
     function computeMonth(yyyymm) {
+        // Presupuestos del mes — base de la proyección
+        const monthBudgets = budgets.filter((b) => b.month === yyyymm);
+        const incomeBudgets = monthBudgets.filter((b) => categories.find((c) => c.id === b.category_id)?.type === "income");
+        const expenseBudgets = monthBudgets.filter((b) => categories.find((c) => c.id === b.category_id)?.type === "expense");
+        const coveredIncCatIds = new Set(incomeBudgets.map((b) => b.category_id).filter(Boolean));
+        const coveredExpCatIds = new Set(expenseBudgets.map((b) => b.category_id).filter(Boolean));
+
+        // Transacciones proyectadas: todas (para el listado), solo one-offs (para los totales)
         const projected = transactions.filter((t) => t.status === "projected" && txMonth(t) === yyyymm);
+        const projIncomeTxs = projected.filter((t) => t.type === "income" && !coveredIncCatIds.has(t.category_id));
+        const projExpenseTxs = projected.filter((t) => t.type === "expense" && !coveredExpCatIds.has(t.category_id));
+
         const real = transactions.filter((t) => t.status !== "projected" && txMonth(t) === yyyymm);
-        const projIncomeTxs = projected.filter((t) => t.type === "income");
-        const projExpenseTxs = projected.filter((t) => t.type === "expense");
         const realIncomeTxs = real.filter((t) => t.type === "income");
-        const realExpenseTxs = real.filter((t) => t.type === "expense");
-        const projIncome = projIncomeTxs.reduce((s, t) => s + convert(t.amount || 0, t.currency || "MXN"), 0);
-        const projExpense = projExpenseTxs.reduce((s, t) => s + convert(t.amount || 0, t.currency || "MXN"), 0);
+        const realExpenseTxs = real.filter(isRegularExpense);
+
+        const budgetIncome = incomeBudgets.reduce((s, b) => s + convert(b.amount || 0, b.currency || "MXN"), 0);
+        const budgetExpense = expenseBudgets.reduce((s, b) => s + convert(b.amount || 0, b.currency || "MXN"), 0);
+
+        const projIncome = budgetIncome + projIncomeTxs.reduce((s, t) => s + convert(t.amount || 0, t.currency || "MXN"), 0);
+        const projExpense = budgetExpense + projExpenseTxs.reduce((s, t) => s + convert(t.amount || 0, t.currency || "MXN"), 0);
         const realIncome = realIncomeTxs.reduce((s, t) => s + convert(t.amount || 0, t.currency || "MXN"), 0);
         const realExpense = realExpenseTxs.reduce((s, t) => s + convert(t.amount || 0, t.currency || "MXN"), 0);
+
+        // Desglose por moneda: mezclar presupuestos + one-offs
+        const projIncomeByC = { ...byCurrency(incomeBudgets) };
+        for (const [c, amt] of Object.entries(byCurrency(projIncomeTxs))) projIncomeByC[c] = (projIncomeByC[c] || 0) + amt;
+        const projExpenseByC = { ...byCurrency(expenseBudgets) };
+        for (const [c, amt] of Object.entries(byCurrency(projExpenseTxs))) projExpenseByC[c] = (projExpenseByC[c] || 0) + amt;
+
         return {
             projected, real,
             projIncome, projExpense, projSavings: projIncome - projExpense,
             realIncome, realExpense, realSavings: realIncome - realExpense,
-            projIncomeByC: byCurrency(projIncomeTxs),
-            projExpenseByC: byCurrency(projExpenseTxs),
+            projIncomeByC, projExpenseByC,
             realIncomeByC: byCurrency(realIncomeTxs),
             realExpenseByC: byCurrency(realExpenseTxs),
+            incomeBudgets, expenseBudgets,
         };
     }
 
-    const monthData = useMemo(() => computeMonth(selectedMonth), [transactions, selectedMonth, convert]);
+    const monthData = useMemo(() => computeMonth(selectedMonth), [transactions, selectedMonth, convert, budgets, categories]);
     const { projected, projIncome, projExpense, projSavings, realIncome, realExpense, realSavings,
-        projIncomeByC, projExpenseByC, realIncomeByC, realExpenseByC } = monthData;
+        projIncomeByC, projExpenseByC, realIncomeByC, realExpenseByC, incomeBudgets, expenseBudgets } = monthData;
 
     const diffIncome = realIncome - projIncome;
     const diffExpense = realExpense - projExpense;
@@ -176,7 +198,7 @@ export default function Projected() {
         const m = String(i + 1).padStart(2, "0");
         const yyyymm = `${selectedYear}-${m}`;
         return { yyyymm, monthName: MONTH_NAMES[i], ...computeMonth(yyyymm) };
-    }), [transactions, selectedYear, convert]);
+    }), [transactions, selectedYear, convert, budgets, categories]);
 
     const yearTotal = useMemo(() => yearMonths.reduce((acc, m) => ({
         projIncome: acc.projIncome + m.projIncome,
@@ -198,7 +220,7 @@ export default function Projected() {
             const projInc = projTxs.filter((t) => t.type === "income").reduce((s, t) => s + convert(t.amount || 0, t.currency || "MXN"), 0);
             const projExp = projTxs.filter((t) => t.type === "expense").reduce((s, t) => s + convert(t.amount || 0, t.currency || "MXN"), 0);
             const realInc = realTxs.filter((t) => t.type === "income").reduce((s, t) => s + convert(t.amount || 0, t.currency || "MXN"), 0);
-            const realExp = realTxs.filter((t) => t.type === "expense").reduce((s, t) => s + convert(t.amount || 0, t.currency || "MXN"), 0);
+            const realExp = realTxs.filter(isRegularExpense).reduce((s, t) => s + convert(t.amount || 0, t.currency || "MXN"), 0);
             const isCurrent = year === thisYear;
             // For current year: blend real (past months) + projected (current month onwards)
             const blendedSavings = isCurrent
@@ -208,7 +230,7 @@ export default function Projected() {
                     return mo < currentMonth ? t.status !== "projected" : t.status === "projected";
                 }).reduce((s, t) => {
                     const amt = convert(t.amount || 0, t.currency || "MXN");
-                    return s + (t.type === "income" ? amt : t.type === "expense" ? -amt : 0);
+                    return s + (t.type === "income" ? amt : isRegularExpense(t) ? -amt : 0);
                 }, 0)
                 : realInc - realExp;
             return {
@@ -219,7 +241,7 @@ export default function Projected() {
                 isCurrent,
             };
         });
-    }, [transactions, convert]);
+    }, [transactions, convert, budgets, categories]);
 
     function CurrencyLines({ byC, total, colorClass = "" }) {
         const [expanded, setExpanded] = useState(false);
@@ -303,10 +325,11 @@ export default function Projected() {
                             </div>
                             {delta !== 0 && (
                                 <div className="text-right shrink-0">
-                                    <p className="text-xs text-muted-foreground">vs hoy</p>
+                                    <p className="text-xs text-muted-foreground">{isRefPast ? "resultado del mes" : "resultado esperado"}</p>
                                     <p className={cn("text-sm font-semibold", delta >= 0 ? "text-primary" : "text-destructive")}>
                                         {delta >= 0 ? "+" : ""}{formatCurrencyCode(delta, displayCurrency)}
                                     </p>
+                                    <p className="text-[10px] text-muted-foreground/60">{delta >= 0 ? "ganaste este mes" : "gastaste más de lo que ingresaste"}</p>
                                 </div>
                             )}
                         </CardContent>
@@ -351,33 +374,32 @@ export default function Projected() {
                             </CardContent></Card>
                         </div>
                     ) : isPast ? (
-                        /* ── Pasado: real es primario, proyectado colapsable ── */
+                        /* ── Pasado: comparación real vs proyectado siempre visible ── */
                         <div className="grid grid-cols-3 gap-2 sm:gap-3">
                             {[
                                 { key: "income", label: "Ingresos", byC: realIncomeByC, total: realIncome, projByC: projIncomeByC, projTotal: projIncome, diff: diffIncome, colorClass: "text-primary", diffGood: diffIncome >= 0 },
                                 { key: "expense", label: "Gastos", byC: realExpenseByC, total: realExpense, projByC: projExpenseByC, projTotal: projExpense, diff: diffExpense, colorClass: "text-destructive", diffGood: diffExpense <= 0 },
                                 { key: "savings", label: "Ahorro", byC: null, total: realSavings, projTotal: projSavings, diff: diffSavings, colorClass: realSavings >= 0 ? "text-primary" : "text-destructive", diffGood: diffSavings >= 0 },
                             ].map(({ key, label, byC, total, projByC, projTotal, diff, colorClass, diffGood }) => (
-                                <Card key={key} className="cursor-pointer" onClick={() => togglePast(key)}>
-                                    <CardContent className="p-2 sm:p-4">
-                                        <div className="flex items-center justify-between mb-1 sm:mb-1.5">
-                                            <p className="text-[10px] sm:text-xs text-muted-foreground">{label}</p>
-                                            <ChevronDown className={cn("h-3 w-3 sm:h-3.5 sm:w-3.5 text-muted-foreground transition-transform shrink-0", pastExpanded[key] && "rotate-180")} />
-                                        </div>
+                                <Card key={key}>
+                                    <CardContent className="p-2 sm:p-4 space-y-1.5 sm:space-y-2">
+                                        <p className="text-[10px] sm:text-xs text-muted-foreground">{label}</p>
+                                        {/* Real — número principal */}
                                         {byC
                                             ? <CurrencyLines byC={byC} total={total} colorClass={colorClass} />
                                             : <p className={cn("text-xs sm:text-sm font-semibold break-all", colorClass)}>{formatCurrencyCode(total, displayCurrency)}</p>
                                         }
-                                        {pastExpanded[key] && (
-                                            <div className="mt-2 pt-2 border-t border-border/50 space-y-0.5">
-                                                <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Proyectado</p>
+                                        {/* Proyectado + diff — siempre visible */}
+                                        {projTotal !== 0 && (
+                                            <div className="pt-1.5 border-t border-border/40 space-y-0.5">
+                                                <p className="text-[10px] text-muted-foreground/70">Meta</p>
                                                 {projByC
                                                     ? <CurrencyLines byC={projByC} total={projTotal} colorClass="text-muted-foreground" />
-                                                    : <p className="text-xs text-muted-foreground font-medium break-all">{formatCurrencyCode(projTotal, displayCurrency)}</p>
+                                                    : <p className="text-[11px] sm:text-xs text-muted-foreground font-medium break-all">{formatCurrencyCode(projTotal, displayCurrency)}</p>
                                                 }
                                                 {diff !== 0 && (
-                                                    <p className={cn("text-xs font-semibold pt-0.5 break-all", diffGood ? "text-primary" : "text-destructive")}>
-                                                        {diff >= 0 ? "+" : ""}{formatCurrencyCode(diff, displayCurrency)} vs meta
+                                                    <p className={cn("text-[11px] sm:text-xs font-semibold break-all", diffGood ? "text-primary" : "text-destructive")}>
+                                                        {diff >= 0 ? "+" : ""}{formatCurrencyCode(diff, displayCurrency)}
                                                     </p>
                                                 )}
                                             </div>
@@ -426,14 +448,69 @@ export default function Projected() {
                         </div>
                     )}
 
+                    {/* Resumen de presupuestos del mes */}
+                    {(incomeBudgets.length > 0 || expenseBudgets.length > 0) && (
+                        <div>
+                            <div className="flex items-center justify-between mb-2">
+                                <h3 className="text-sm font-semibold text-muted-foreground">Presupuestos del mes</h3>
+                                <Button variant="ghost" size="sm" className="h-6 text-xs px-2"
+                                    onClick={() => setBudgetExpanded((e) => !e)}>
+                                    <ChevronDown className={cn("h-3 w-3 mr-1 transition-transform", budgetExpanded && "rotate-180")} />
+                                    {budgetExpanded ? "Ocultar" : "Ver detalle"}
+                                </Button>
+                            </div>
+                            {budgetExpanded ? (
+                                <Card className="overflow-hidden">
+                                    <div className="divide-y divide-border">
+                                        {[...incomeBudgets, ...expenseBudgets].map((b) => {
+                                            const isIncome = incomeBudgets.includes(b);
+                                            return (
+                                                <div key={b.id} className="flex items-center justify-between px-3 py-2 text-sm">
+                                                    <span className="text-muted-foreground">{b.category_name}</span>
+                                                    <span className={cn("font-medium", isIncome ? "text-primary" : "text-destructive")}>
+                                                        {isIncome ? "+" : "−"}{formatCurrencyCode(b.amount, b.currency || "MXN")}
+                                                    </span>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </Card>
+                            ) : (
+                                <Card>
+                                    <CardContent className="p-3 flex flex-wrap gap-x-5 gap-y-1 text-sm items-center">
+                                        {incomeBudgets.length > 0 && (
+                                            <span className="text-muted-foreground">
+                                                Ingresos: <span className="text-primary font-medium">
+                                                    {formatCurrencyCode(incomeBudgets.reduce((s, b) => s + convert(b.amount || 0, b.currency || "MXN"), 0), displayCurrency)}
+                                                </span>
+                                            </span>
+                                        )}
+                                        {expenseBudgets.length > 0 && (
+                                            <span className="text-muted-foreground">
+                                                Gastos: <span className="text-destructive font-medium">
+                                                    {formatCurrencyCode(expenseBudgets.reduce((s, b) => s + convert(b.amount || 0, b.currency || "MXN"), 0), displayCurrency)}
+                                                </span>
+                                            </span>
+                                        )}
+                                        <span className="text-xs text-muted-foreground/60 ml-auto">
+                                            {incomeBudgets.length + expenseBudgets.length} presupuesto{incomeBudgets.length + expenseBudgets.length !== 1 ? "s" : ""}
+                                        </span>
+                                    </CardContent>
+                                </Card>
+                            )}
+                        </div>
+                    )}
+
                     <div>
-                        <h3 className="text-sm font-semibold text-muted-foreground mb-2">Proyecciones de {getMonthLabel(selectedMonth)}</h3>
+                        <h3 className="text-sm font-semibold text-muted-foreground mb-2">
+                            {incomeBudgets.length + expenseBudgets.length > 0 ? `Proyecciones adicionales de ${getMonthLabel(selectedMonth)}` : `Proyecciones de ${getMonthLabel(selectedMonth)}`}
+                        </h3>
                         {isLoading ? (
                             <p className="text-muted-foreground text-sm">Cargando...</p>
                         ) : projected.length === 0 ? (
                             <Card><CardContent className="py-10 text-center text-muted-foreground text-sm">
                                 <CloudLightning className="h-7 w-7 mx-auto mb-2 opacity-30" />
-                                <p className="mb-4">No hay proyecciones para este mes.</p>
+                                <p className="mb-4">No hay proyecciones adicionales para este mes.</p>
                                 {prevMonthProjected.length > 0 && (
                                     <div className="flex flex-col sm:flex-row gap-2 justify-center items-center">
                                         <Button variant="outline" onClick={copyFromPrevMonth}>

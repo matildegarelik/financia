@@ -11,6 +11,7 @@ const createEntityClient = (tableName) => ({
         if (sort) {
             const ascending = !sort.startsWith('-');
             q = q.order(sort.replace(/^-/, ''), { ascending });
+            q = q.order("created_at", { ascending: false });
         }
         if (limit) q = q.limit(limit);
         const { data, error } = await q;

@@ -180,6 +180,7 @@ export default function Transactions() {
             }
 
             q = q.order("date", { ascending: false, nullsFirst: false });
+            q = q.order("created_at", { ascending: false });
             return q;
         };
     }
