@@ -325,11 +325,10 @@ export default function Projected() {
                             </div>
                             {delta !== 0 && (
                                 <div className="text-right shrink-0">
-                                    <p className="text-xs text-muted-foreground">{isRefPast ? "resultado del mes" : "resultado esperado"}</p>
-                                    <p className={cn("text-sm font-semibold", delta >= 0 ? "text-primary" : "text-destructive")}>
-                                        {delta >= 0 ? "+" : ""}{formatCurrencyCode(delta, displayCurrency)}
+                                    <p className="text-xs text-muted-foreground">hoy</p>
+                                    <p className="text-sm font-semibold text-muted-foreground">
+                                        {formatCurrencyCode(currentTotalSavings, displayCurrency)}
                                     </p>
-                                    <p className="text-[10px] text-muted-foreground/60">{delta >= 0 ? "ganaste este mes" : "gastaste más de lo que ingresaste"}</p>
                                 </div>
                             )}
                         </CardContent>
