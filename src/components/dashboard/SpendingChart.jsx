@@ -12,7 +12,7 @@ export default function SpendingChart({ transactions = [], convert, displayCurre
             .filter(isRegularExpense)
             .forEach((t) => {
                 const key = t.category_name || "Sin categoría";
-                byCategory[key] = (byCategory[key] || 0) + (convert ? convert(t.amount || 0, t.currency || "MXN") : (t.amount || 0));
+                byCategory[key] = (byCategory[key] || 0) + (convert ? convert(t.amount || 0, t.currency || "ARS") : (t.amount || 0));
             });
         return Object.entries(byCategory)
             .map(([name, value]) => ({ name, value: Math.round(value * 100) / 100 }))
@@ -47,7 +47,7 @@ export default function SpendingChart({ transactions = [], convert, displayCurre
                                 tickLine={false}
                             />
                             <Tooltip
-                                formatter={(v) => [formatCurrencyCode(v, displayCurrency || "MXN"), "Gasto"]}
+                                formatter={(v) => [formatCurrencyCode(v, displayCurrency || "ARS"), "Gasto"]}
                                 contentStyle={{ fontSize: 12, borderRadius: 8 }}
                                 cursor={{ fill: "hsl(var(--muted))", opacity: 0.5 }}
                             />
@@ -55,7 +55,7 @@ export default function SpendingChart({ transactions = [], convert, displayCurre
                                 position: "right",
                                 fontSize: 11,
                                 fill: "hsl(var(--muted-foreground))",
-                                formatter: (v) => formatCurrencyCode(v, displayCurrency || "MXN"),
+                                formatter: (v) => formatCurrencyCode(v, displayCurrency || "ARS"),
                             }}>
                                 {data.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
                             </Bar>

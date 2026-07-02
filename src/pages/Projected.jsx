@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, ChevronLeft, ChevronRight, ChevronDown, TrendingUp, TrendingDown, Target, CloudLightning, Trash2, RefreshCw } from "lucide-react";
+import { Plus, ChevronLeft, ChevronRight, ChevronDown, CloudLightning, Trash2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -9,7 +9,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import PageHeader from "@/components/shared/PageHeader";
 import CurrencySelector from "@/components/shared/CurrencySelector";
 import TransactionFormProjected from "@/components/transactions/TransactionFormProjected";
-import { formatCurrencyCode, formatDate, getCurrentMonth, getMonthLabel, isRegularExpense } from "@/lib/formatters";
+import { formatCurrencyCode, formatDate, getCurrentMonth, getMonthLabel, isRegularExpense, getTransferDestinationAmount } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { useCurrency } from "@/lib/currency-context";
 import { toast } from "sonner";
@@ -102,17 +102,17 @@ export default function Projected() {
                         if (tx.type === "expense") return s - (tx.amount || 0);
                         if (tx.type === "transfer") return s - (tx.amount || 0);
                     }
-                    if (tx.to_account_id === acc.id && tx.type === "transfer") return s + (tx.to_amount || tx.amount || 0);
+                    if (tx.to_account_id === acc.id && tx.type === "transfer") return s + getTransferDestinationAmount(tx, acc.currency);
                     return s;
                 }, acc.balance || 0);
-            return sum + convert(eff, acc.currency || "MXN");
+            return sum + convert(eff, acc.currency || "ARS");
         }, 0);
     }, [accounts, transactions, convert]);
 
     const investedTotal = useMemo(() =>
         investments
             .filter((i) => !i.status || i.status === "activa")
-            .reduce((s, i) => s + convert(i.current_value || i.amount_invested || 0, i.currency || "MXN"), 0),
+            .reduce((s, i) => s + convert(i.current_value || i.amount_invested || 0, i.currency || "ARS"), 0),
         [investments, convert]);
 
     const currentTotalSavings = currentLiquidBalance + investedTotal;
@@ -138,7 +138,7 @@ export default function Projected() {
 
     function byCurrency(txs) {
         return txs.reduce((acc, t) => {
-            const c = t.currency || "MXN";
+            const c = t.currency || "ARS";
             acc[c] = (acc[c] || 0) + (t.amount || 0);
             return acc;
         }, {});
@@ -161,13 +161,13 @@ export default function Projected() {
         const realIncomeTxs = real.filter((t) => t.type === "income");
         const realExpenseTxs = real.filter(isRegularExpense);
 
-        const budgetIncome = incomeBudgets.reduce((s, b) => s + convert(b.amount || 0, b.currency || "MXN"), 0);
-        const budgetExpense = expenseBudgets.reduce((s, b) => s + convert(b.amount || 0, b.currency || "MXN"), 0);
+        const budgetIncome = incomeBudgets.reduce((s, b) => s + convert(b.amount || 0, b.currency || "ARS"), 0);
+        const budgetExpense = expenseBudgets.reduce((s, b) => s + convert(b.amount || 0, b.currency || "ARS"), 0);
 
-        const projIncome = budgetIncome + projIncomeTxs.reduce((s, t) => s + convert(t.amount || 0, t.currency || "MXN"), 0);
-        const projExpense = budgetExpense + projExpenseTxs.reduce((s, t) => s + convert(t.amount || 0, t.currency || "MXN"), 0);
-        const realIncome = realIncomeTxs.reduce((s, t) => s + convert(t.amount || 0, t.currency || "MXN"), 0);
-        const realExpense = realExpenseTxs.reduce((s, t) => s + convert(t.amount || 0, t.currency || "MXN"), 0);
+        const projIncome = budgetIncome + projIncomeTxs.reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0);
+        const projExpense = budgetExpense + projExpenseTxs.reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0);
+        const realIncome = realIncomeTxs.reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0);
+        const realExpense = realExpenseTxs.reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0);
 
         // Desglose por moneda: mezclar presupuestos + one-offs
         const projIncomeByC = { ...byCurrency(incomeBudgets) };
@@ -217,10 +217,10 @@ export default function Projected() {
             const txsOfYear = transactions.filter((t) => t.date?.startsWith(year));
             const projTxs = txsOfYear.filter((t) => t.status === "projected");
             const realTxs = txsOfYear.filter((t) => t.status !== "projected");
-            const projInc = projTxs.filter((t) => t.type === "income").reduce((s, t) => s + convert(t.amount || 0, t.currency || "MXN"), 0);
-            const projExp = projTxs.filter((t) => t.type === "expense").reduce((s, t) => s + convert(t.amount || 0, t.currency || "MXN"), 0);
-            const realInc = realTxs.filter((t) => t.type === "income").reduce((s, t) => s + convert(t.amount || 0, t.currency || "MXN"), 0);
-            const realExp = realTxs.filter(isRegularExpense).reduce((s, t) => s + convert(t.amount || 0, t.currency || "MXN"), 0);
+            const projInc = projTxs.filter((t) => t.type === "income").reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0);
+            const projExp = projTxs.filter((t) => t.type === "expense").reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0);
+            const realInc = realTxs.filter((t) => t.type === "income").reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0);
+            const realExp = realTxs.filter(isRegularExpense).reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0);
             const isCurrent = year === thisYear;
             // For current year: blend real (past months) + projected (current month onwards)
             const blendedSavings = isCurrent
@@ -229,7 +229,7 @@ export default function Projected() {
                     if (!mo) return false;
                     return mo < currentMonth ? t.status !== "projected" : t.status === "projected";
                 }).reduce((s, t) => {
-                    const amt = convert(t.amount || 0, t.currency || "MXN");
+                    const amt = convert(t.amount || 0, t.currency || "ARS");
                     return s + (t.type === "income" ? amt : isRegularExpense(t) ? -amt : 0);
                 }, 0)
                 : realInc - realExp;
@@ -279,15 +279,19 @@ export default function Projected() {
                 title="Proyectado"
                 description="Seguimiento de metas vs realidad"
                 action={
-                    <div className="flex items-center gap-2">
-                        <CurrencySelector />
+                    <div className="flex items-center gap-1.5 sm:gap-2">
+                        <CurrencySelector className="w-20 sm:w-24 h-8 text-xs sm:text-sm" />
                         {view === "monthly" && projected.length > 0 && prevMonthProjected.length > 0 && (
-                            <Button variant="outline" size="sm" onClick={copyFromPrevMonth}>
-                                <RefreshCw className="h-4 w-4 mr-1.5" />Copiar mes anterior
+                            <Button variant="outline" size="sm" className="h-8 px-2 sm:px-3 text-xs sm:text-sm" onClick={copyFromPrevMonth}>
+                                <RefreshCw className="h-4 w-4 mr-1 sm:mr-1.5" />
+                                <span className="sm:hidden">Copiar</span>
+                                <span className="hidden sm:inline">Copiar mes anterior</span>
                             </Button>
                         )}
-                        <Button size="sm" onClick={() => setShowForm(true)}>
-                            <Plus className="h-4 w-4 mr-1.5" />Nueva proyección
+                        <Button size="sm" className="h-8 px-2 sm:px-3 text-xs sm:text-sm" onClick={() => setShowForm(true)}>
+                            <Plus className="h-4 w-4 mr-1 sm:mr-1.5" />
+                            <span className="sm:hidden">Nueva</span>
+                            <span className="hidden sm:inline">Nueva proyección</span>
                         </Button>
                     </div>
                 }
@@ -467,7 +471,7 @@ export default function Projected() {
                                                 <div key={b.id} className="flex items-center justify-between px-3 py-2 text-sm">
                                                     <span className="text-muted-foreground">{b.category_name}</span>
                                                     <span className={cn("font-medium", isIncome ? "text-primary" : "text-destructive")}>
-                                                        {isIncome ? "+" : "−"}{formatCurrencyCode(b.amount, b.currency || "MXN")}
+                                                        {isIncome ? "+" : "−"}{formatCurrencyCode(b.amount, b.currency || "ARS")}
                                                     </span>
                                                 </div>
                                             );
@@ -480,14 +484,14 @@ export default function Projected() {
                                         {incomeBudgets.length > 0 && (
                                             <span className="text-muted-foreground">
                                                 Ingresos: <span className="text-primary font-medium">
-                                                    {formatCurrencyCode(incomeBudgets.reduce((s, b) => s + convert(b.amount || 0, b.currency || "MXN"), 0), displayCurrency)}
+                                                    {formatCurrencyCode(incomeBudgets.reduce((s, b) => s + convert(b.amount || 0, b.currency || "ARS"), 0), displayCurrency)}
                                                 </span>
                                             </span>
                                         )}
                                         {expenseBudgets.length > 0 && (
                                             <span className="text-muted-foreground">
                                                 Gastos: <span className="text-destructive font-medium">
-                                                    {formatCurrencyCode(expenseBudgets.reduce((s, b) => s + convert(b.amount || 0, b.currency || "MXN"), 0), displayCurrency)}
+                                                    {formatCurrencyCode(expenseBudgets.reduce((s, b) => s + convert(b.amount || 0, b.currency || "ARS"), 0), displayCurrency)}
                                                 </span>
                                             </span>
                                         )}
@@ -535,7 +539,7 @@ export default function Projected() {
                                             </div>
                                             <div className="flex items-center gap-2 shrink-0">
                                                 <p className={cn("text-sm font-semibold", tx.type === "income" ? "text-primary" : "text-destructive")}>
-                                                    {tx.type === "income" ? "+" : "-"}{formatCurrencyCode(tx.amount, tx.currency || "MXN")}
+                                                    {tx.type === "income" ? "+" : "-"}{formatCurrencyCode(tx.amount, tx.currency || "ARS")}
                                                 </p>
                                                 <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive"
                                                     onClick={(e) => { e.stopPropagation(); deleteMut.mutate(tx.id); }}>

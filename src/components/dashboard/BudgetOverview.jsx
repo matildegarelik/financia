@@ -1,7 +1,7 @@
 import React from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { formatCurrencyCode, getCurrentMonth, isRegularExpense } from "@/lib/formatters";
+import { formatCurrencyCode, isRegularExpense } from "@/lib/formatters";
 import { Link } from "react-router-dom";
 import { format, startOfMonth, endOfMonth } from "date-fns";
 
@@ -48,7 +48,7 @@ export default function BudgetOverview({ budgets, transactions = [] }) {
                                     <div className="flex items-center justify-between text-sm">
                                         <span className="font-medium">{b.category_name}</span>
                                         <span className="text-muted-foreground">
-                                            {formatCurrencyCode(spent, b.currency || "MXN")} / {formatCurrencyCode(b.amount, b.currency || "MXN")}
+                                            {formatCurrencyCode(spent, b.currency || "ARS")} / {formatCurrencyCode(b.amount, b.currency || "ARS")}
                                         </span>
                                     </div>
                                     <Progress value={pct} className={overBudget ? "[&>div]:bg-destructive" : "[&>div]:bg-primary"} />

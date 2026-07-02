@@ -35,11 +35,10 @@
         "currency": {
             "type": "string",
             "enum": [
-                "MXN",
                 "USD",
                 "EUR"
             ],
-            "default": "MXN"
+            "default": "USD"
         },
         "purchase_date": {
             "type": "string",

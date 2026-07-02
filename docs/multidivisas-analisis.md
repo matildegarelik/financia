@@ -59,4 +59,3 @@ La clave es **no mezclar monedas distintas al comparar períodos históricos lar
 
 - `exchange_rates.updated_at` es `text` en vez de `date` — debería ser `date`
 - No hay índice en `(from_currency, to_currency)` en `exchange_rates`
-- La conversión bridge vía MXN en `convertCurrency()` asume MXN como pivote — problemático para usuarios sin MXN activo

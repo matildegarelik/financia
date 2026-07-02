@@ -31,8 +31,8 @@ export default function Investments() {
     const activeInvestments = investments.filter((i) => !i.status || i.status === "activa");
     const finalizedInvestments = investments.filter((i) => i.status === "finalizada");
 
-    const totalInvested = activeInvestments.reduce((s, i) => s + convert(i.amount_invested || 0, i.currency || "MXN"), 0);
-    const totalCurrent = activeInvestments.reduce((s, i) => s + convert(i.current_value || i.amount_invested || 0, i.currency || "MXN"), 0);
+    const totalInvested = activeInvestments.reduce((s, i) => s + convert(i.amount_invested || 0, i.currency || "ARS"), 0);
+    const totalCurrent = activeInvestments.reduce((s, i) => s + convert(i.current_value || i.amount_invested || 0, i.currency || "ARS"), 0);
     const totalReturn = totalCurrent - totalInvested;
     const returnPct = totalInvested > 0 ? ((totalReturn / totalInvested) * 100).toFixed(1) : 0;
 
@@ -89,7 +89,7 @@ export default function Investments() {
                     status: "confirmed",
                     date: finalizationDate || TODAY,
                     amount: finalAmount,
-                    currency: inv.currency || "MXN",
+                    currency: inv.currency || "ARS",
                     account_id: targetAccountId,
                     account_name: acc?.name || "",
                     description: `Inversión finalizada: ${inv.name}`,
@@ -248,7 +248,7 @@ function FinalizeDialog({ inv, accounts, onClose, onSubmit, isPending }) {
                     });
                 }} className="space-y-4">
                     <div>
-                        <Label>Monto final recibido ({inv.currency || "MXN"})</Label>
+                        <Label>Monto final recibido ({inv.currency || "ARS"})</Label>
                         <Input type="number" step="0.01" value={finalAmount}
                             onChange={(e) => setFinalAmount(e.target.value)} required />
                     </div>
@@ -260,7 +260,7 @@ function FinalizeDialog({ inv, accounts, onClose, onSubmit, isPending }) {
                             <SelectContent>
                                 <SelectItem value="none">Sin cuenta (solo cerrar)</SelectItem>
                                 {[...accounts].sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999)).map((a) => (
-                                    <SelectItem key={a.id} value={a.id}>{a.name} ({a.currency || "MXN"})</SelectItem>
+                                    <SelectItem key={a.id} value={a.id}>{a.name} ({a.currency || "ARS"})</SelectItem>
                                 ))}
                             </SelectContent>
                         </Select>
@@ -284,7 +284,7 @@ function FinalizeDialog({ inv, accounts, onClose, onSubmit, isPending }) {
 
 function InvestmentFormDialog({ open, onClose, onSubmit, initial, accounts = [] }) {
     const { activeCurrencies } = useCurrency();
-    const defaultCurrency = activeCurrencies[0] || "MXN";
+    const defaultCurrency = activeCurrencies[0] || "ARS";
     const blank = { name: "", type: "stocks", amount_invested: "", current_value: "", currency: defaultCurrency, platform: "", purchase_date: "", notes: "", account_id: "" };
     const [form, setForm] = useState(blank);
     React.useEffect(() => {
@@ -339,7 +339,7 @@ function InvestmentFormDialog({ open, onClose, onSubmit, initial, accounts = [] 
                                 <SelectContent>
                                     <SelectItem value="none">Sin cuenta asociada</SelectItem>
                                     {[...accounts].sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999)).map((a) => (
-                                        <SelectItem key={a.id} value={a.id}>{a.name} ({a.currency || "MXN"})</SelectItem>
+                                        <SelectItem key={a.id} value={a.id}>{a.name} ({a.currency || "ARS"})</SelectItem>
                                     ))}
                                 </SelectContent>
                             </Select>

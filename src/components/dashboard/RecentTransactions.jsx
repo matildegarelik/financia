@@ -1,6 +1,5 @@
 import React from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { formatCurrency, formatDate } from "@/lib/formatters";
 import { ArrowDownLeft, ArrowUpRight, ArrowLeftRight } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -43,11 +42,11 @@ export default function RecentTransactions({ transactions }) {
                                     <div className="text-right">
                                         <span className={cn("text-sm font-semibold block", cfg.color)}>
                                             {tx.type === "income" ? "+" : tx.type === "expense" ? "-" : ""}
-                                            {formatCurrency(tx.amount, tx.currency || "MXN")}
+                                            {formatCurrency(tx.amount, tx.currency || "ARS")}
                                         </span>
                                         {tx.currency && tx.currency !== displayCurrency && (
                                             <span className="text-xs text-muted-foreground">
-                                                ≈ {formatCurrency(convert(tx.amount, tx.currency || "MXN"), displayCurrency)}
+                                                ≈ {formatCurrency(convert(tx.amount, tx.currency || "ARS"), displayCurrency)}
                                             </span>
                                         )}
                                     </div>

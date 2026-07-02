@@ -14,10 +14,10 @@ const TEMPLATE_HEADERS = [
 ];
 
 const EXAMPLE_ROWS = [
-    ["income", "confirmed", "35000", "MXN", "Salario junio", "2026-06-01", "Salario", "Cuenta BBVA", "", "", "", "", "", "", ""],
-    ["expense", "confirmed", "1200", "MXN", "Supermercado", "2026-06-03", "Alimentación", "Cuenta BBVA", "", "", "", "", "", "", ""],
+    ["income", "confirmed", "35000", "ARS", "Salario junio", "2026-06-01", "Salario", "Cuenta BBVA", "", "", "", "", "", "", ""],
+    ["expense", "confirmed", "1200", "ARS", "Supermercado", "2026-06-03", "Alimentación", "Cuenta BBVA", "", "", "", "", "", "", ""],
     ["income", "installment", "5000", "USD", "Proyecto web", "2026-07-01", "Freelance", "Cuenta BBVA", "", "App Móvil", "Acme Corp", "2026-07-15", "2", "4", ""],
-    ["expense", "projected", "800", "MXN", "Salida cine", "2026-06-20", "Entretenimiento", "Efectivo", "Estimado", "", "", "", "", "", "70"],
+    ["expense", "projected", "800", "ARS", "Salida cine", "2026-06-20", "Entretenimiento", "Efectivo", "Estimado", "", "", "", "", "", "70"],
 ];
 
 function downloadTemplate() {
@@ -67,7 +67,7 @@ export default function ImportModal({ open, onClose, accounts, categories, onImp
                         type: row.type || "expense",
                         status: row.status || "confirmed",
                         amount: parseFloat(row.amount) || 0,
-                        currency: row.currency || "MXN",
+                        currency: row.currency || "ARS",
                         description: row.description || "",
                         date: row.date,
                         category_name: row.category_name || "",

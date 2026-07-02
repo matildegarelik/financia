@@ -111,14 +111,18 @@ export default function Sidebar() {
             </aside>
 
             {/* Mobile bottom nav */}
-            <nav className="fixed bottom-0 left-0 right-0 bg-card border-t border-border z-40 lg:hidden" style={{ paddingBottom: '15px' }}>
-                <div className="flex items-center">
+            <nav className="fixed bottom-0 left-0 right-0 bg-sidebar border-t border-sidebar-border z-40 lg:hidden shadow-[0_-12px_30px_rgba(0,0,0,0.28)]" style={{ paddingBottom: '15px' }}>
+                <div className="flex items-center px-1.5 pt-1.5">
                     {favItems.slice(0, 5).map((item) => {
                         const isActive = location.pathname === item.path;
                         return (
                             <Link key={item.path} to={item.path}
-                                className={cn("flex flex-col items-center gap-0.5 py-2 flex-1",
-                                    isActive ? "text-primary" : "text-muted-foreground")}
+                                className={cn(
+                                    "flex flex-col items-center gap-0.5 py-2 flex-1 rounded-lg transition-colors",
+                                    isActive
+                                        ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                                        : "text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                                )}
                             >
                                 <item.icon className="h-5 w-5" />
                                 <span className="text-[10px] font-medium leading-none truncate max-w-[50px] text-center">{item.label.split(" ")[0]}</span>
@@ -127,7 +131,7 @@ export default function Sidebar() {
                     })}
                     <button
                         onClick={() => setMoreOpen(true)}
-                        className="flex flex-col items-center gap-0.5 py-2 flex-1 text-muted-foreground"
+                        className="flex flex-col items-center gap-0.5 py-2 flex-1 rounded-lg text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
                     >
                         <MoreHorizontal className="h-5 w-5" />
                         <span className="text-[10px] font-medium leading-none">Más</span>
@@ -140,12 +144,12 @@ export default function Sidebar() {
                 <div className="fixed inset-0 z-50 lg:hidden" onClick={() => setMoreOpen(false)}>
                     <div className="absolute inset-0 bg-black/40" />
                     <div
-                        className="absolute bottom-0 left-0 right-0 bg-card rounded-t-2xl border-t border-border pb-safe"
+                        className="absolute bottom-0 left-0 right-0 bg-sidebar text-sidebar-foreground rounded-t-2xl border-t border-sidebar-border pb-safe shadow-[0_-20px_60px_rgba(0,0,0,0.4)]"
                         onClick={(e) => e.stopPropagation()}
                     >
-                        <div className="flex items-center justify-between px-4 pt-4 pb-2 border-b border-border">
+                        <div className="flex items-center justify-between px-4 pt-4 pb-2 border-b border-sidebar-border">
                             <span className="font-semibold text-sm">Menú</span>
-                            <button onClick={() => setMoreOpen(false)} className="text-muted-foreground">
+                            <button onClick={() => setMoreOpen(false)} className="text-sidebar-foreground/70 hover:text-sidebar-foreground transition-colors">
                                 <X className="h-5 w-5" />
                             </button>
                         </div>
@@ -159,7 +163,9 @@ export default function Sidebar() {
                                         onClick={() => setMoreOpen(false)}
                                         className={cn(
                                             "flex flex-col items-center gap-1.5 py-3 px-1 rounded-xl transition-colors",
-                                            isActive ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted"
+                                            isActive
+                                                ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                                                : "text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                                         )}
                                     >
                                         <item.icon className="h-5 w-5" />
@@ -171,7 +177,7 @@ export default function Sidebar() {
                         <div className="px-4 pb-4">
                             <button
                                 onClick={() => supabase.auth.signOut().then(() => { window.location.href = '/sign-in'; })}
-                                className="flex items-center gap-2 w-full px-4 py-3 rounded-xl text-sm text-muted-foreground hover:bg-muted transition-colors"
+                                className="flex items-center gap-2 w-full px-4 py-3 rounded-xl text-sm text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
                             >
                                 <LogOut className="h-4 w-4" />
                                 Cerrar sesión

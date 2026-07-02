@@ -7,19 +7,16 @@ import { Button } from "@/components/ui/button";
 import PageHeader from "@/components/shared/PageHeader";
 import { RefreshCw, Save, Loader2, Plus, X, Star, Bitcoin, ChevronUp, ChevronDown, ArrowRight, GripVertical } from "lucide-react";
 import { toast } from "sonner";
+import { getTransferDestinationAmount } from "@/lib/formatters";
 import { useCurrency } from "@/lib/currency-context";
 import { navItems, loadFavPaths, saveFavPaths } from "@/components/layout/Sidebar";
 import { cn } from "@/lib/utils";
 import { Reorder, useDragControls } from "framer-motion";
 
 const CURRENCY_INFO = {
-    MXN: { name: "Peso Mexicano", flag: "🇲🇽" },
     USD: { name: "Dólar Americano", flag: "🇺🇸" },
     EUR: { name: "Euro", flag: "🇪🇺" },
-    ARS: { name: "Peso Argentino", flag: "🇦🇷" },
-    COP: { name: "Peso Colombiano", flag: "🇨🇴" },
-    CLP: { name: "Peso Chileno", flag: "🇨🇱" },
-    PEN: { name: "Sol Peruano", flag: "🇵🇪" },
+    ARS: { name: "Peso Argentino", flag: "🇦🇷" }
 };
 
 function CurrencyItem({ cur, idx, total, onMove, onRemove }) {
@@ -83,7 +80,7 @@ export default function Settings() {
                     if (tx.type === "expense") return sum - (tx.amount || 0);
                     if (tx.type === "transfer") return sum - (tx.amount || 0);
                 }
-                if (tx.to_account_id === acc.id && tx.type === "transfer") return sum + (tx.to_amount || tx.amount || 0);
+                if (tx.to_account_id === acc.id && tx.type === "transfer") return sum + getTransferDestinationAmount(tx, acc.currency);
                 return sum;
             }, acc.balance || 0);
     }
@@ -445,7 +442,7 @@ export default function Settings() {
                         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
                             {accounts.map((acc) => {
                                 const effective = computeEffective(acc);
-                                const cur = acc.currency || "MXN";
+                                const cur = acc.currency || "ARS";
                                 return (
                                     <div key={acc.id} className="p-3 rounded-lg border bg-muted/10 space-y-3">
                                         <div>

@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { buildRatesMap, convertCurrency, CURRENCIES } from "./formatters";
 
-const ALL_CURRENCIES = ["ARS", "USD", "EUR", "MXN", "COP", "CLP", "PEN"];
+const ALL_CURRENCIES = ["ARS", "USD", "EUR"];
 
 const CurrencyContext = createContext({
     rates: {},
@@ -22,7 +22,7 @@ function loadActiveCurrencies() {
         const saved = localStorage.getItem("activeCurrencies");
         if (saved) return JSON.parse(saved);
     } catch { }
-    return ["ARS", "USD", "EUR", "MXN"];
+    return ["ARS", "USD", "EUR"];
 }
 
 function loadDisplayCurrency(activeCurrencies) {

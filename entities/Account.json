@@ -21,7 +21,6 @@
         "currency": {
             "type": "string",
             "enum": [
-                "MXN",
                 "USD",
                 "EUR",
                 "COP",
@@ -29,7 +28,7 @@
                 "CLP",
                 "PEN"
             ],
-            "default": "MXN",
+            "default": "ARS",
             "description": "Moneda de la cuenta"
         },
         "balance": {

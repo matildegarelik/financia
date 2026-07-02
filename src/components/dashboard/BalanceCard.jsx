@@ -1,9 +1,9 @@
-import React, { useState } from "react";
+import React from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useCurrency } from "@/lib/currency-context";
-import { formatCurrency, TODAY } from "@/lib/formatters";
-import { Wallet, TrendingUp, CreditCard, Lock } from "lucide-react";
+import { formatCurrency, TODAY, getTransferDestinationAmount } from "@/lib/formatters";
+import { Wallet, TrendingUp, Lock } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // horizon: "now" | "certain" | "projected"
@@ -23,19 +23,19 @@ export default function BalanceCard({ accounts, transactions, investments, horiz
                     if (tx.type === "expense") return sum - (tx.amount || 0);
                     if (tx.type === "transfer") return sum - (tx.amount || 0);
                 }
-                if (tx.to_account_id === acc.id && tx.type === "transfer") return sum + (tx.to_amount || tx.amount || 0);
+                if (tx.to_account_id === acc.id && tx.type === "transfer") return sum + getTransferDestinationAmount(tx, acc.currency);
                 return sum;
             }, acc.balance || 0);
     }
 
     let liquidBalance = liquidAccounts.reduce(
-        (s, a) => s + convert(computeEffective(a), a.currency || "MXN"), 0
+        (s, a) => s + convert(computeEffective(a), a.currency || "ARS"), 0
     );
 
     // Investment value from Investment entity — only active ones
     const activeInvestments = investments.filter((i) => !i.status || i.status === "activa");
     const investedValue = activeInvestments.reduce(
-        (s, i) => s + convert(i.current_value || i.amount_invested || 0, i.currency || "MXN"), 0
+        (s, i) => s + convert(i.current_value || i.amount_invested || 0, i.currency || "ARS"), 0
     );
 
     // Future transactions to add based on horizon
@@ -52,7 +52,7 @@ export default function BalanceCard({ accounts, transactions, investments, horiz
     });
 
     let futureImpact = futureTx.reduce((s, t) => {
-        const amt = convert(t.amount || 0, t.currency || "MXN");
+        const amt = convert(t.amount || 0, t.currency || "ARS");
         const prob = horizon === "projected" && t.status === "projected" ? (t.probability || 80) / 100 : 1;
         if (t.type === "income") return s + amt * prob;
         if (t.type === "expense") return s - amt * prob;

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Wallet, CreditCard, Banknote, PiggyBank, TrendingUp, MoreHorizontal, Trash2, Pencil, Lock, Bitcoin, Star, ChevronUp, ChevronDown, GripVertical, Info, Eye, EyeOff } from "lucide-react";
+import { Plus, Wallet, CreditCard, Banknote, PiggyBank, MoreHorizontal, Trash2, Pencil, Lock, Bitcoin, Star, ChevronUp, ChevronDown, GripVertical, Info, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -13,10 +13,9 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Badge } from "@/components/ui/badge";
 import PageHeader from "@/components/shared/PageHeader";
 import CurrencySelector from "@/components/shared/CurrencySelector";
-import { formatCurrency, formatCurrencyCode, ACCOUNT_TYPES, CURRENCIES } from "@/lib/formatters";
+import { formatCurrency, formatCurrencyCode, ACCOUNT_TYPES, getTransferDestinationAmount } from "@/lib/formatters";
 import { useCurrency } from "@/lib/currency-context";
 import { cn } from "@/lib/utils";
-import { Reorder, useDragControls } from "framer-motion";
 
 const iconMap = {
     checking: Wallet, savings: PiggyBank, credit_card: CreditCard,
@@ -39,7 +38,7 @@ export default function Accounts() {
     });
     const { data: transactions = [] } = useQuery({
         queryKey: ["transactions"],
-        queryFn: () => base44.entities.Transaction.list("-date", 500),
+        queryFn: () => base44.entities.Transaction.list("-date", 5000),
     });
 
     const today = new Date().toISOString().split("T")[0];
@@ -55,7 +54,7 @@ export default function Accounts() {
                     if (tx.type === "transfer") return sum - (tx.amount || 0);
                 }
                 if (tx.to_account_id === acc.id && tx.type === "transfer") {
-                    return sum + (tx.to_amount || tx.amount || 0);
+                    return sum + getTransferDestinationAmount(tx, acc.currency);
                 }
                 return sum;
             }, initial);
@@ -75,10 +74,15 @@ export default function Accounts() {
     });
 
     const [localAccounts, setLocalAccounts] = useState([]);
+    const localAccountsRef = useRef([]);
     const reorderTimer = useRef(null);
+    const draggingId = useRef(null);
+    const dragArmedId = useRef(null);
 
     useEffect(() => {
-        setLocalAccounts([...accounts].sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999)));
+        const ordered = [...accounts].sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999));
+        localAccountsRef.current = ordered;
+        setLocalAccounts(ordered);
     }, [accounts]);
 
     const persistOrder = (ordered) => {
@@ -92,6 +96,7 @@ export default function Accounts() {
     };
 
     const handleReorder = (newOrder) => {
+        localAccountsRef.current = newOrder;
         setLocalAccounts(newOrder);
         persistOrder(newOrder);
     };
@@ -112,20 +117,80 @@ export default function Accounts() {
         handleReorder(next);
     };
 
+    const moveDraggedAccount = (targetId, placement = "before") => {
+        const draggedId = draggingId.current;
+        if (!draggedId || draggedId === targetId) return;
+
+        setLocalAccounts((current) => {
+            if (localAccountsRef.current !== current) {
+                localAccountsRef.current = current;
+            }
+
+            const dragged = current.find((a) => a.id === draggedId);
+            if (!dragged) return current;
+
+            const withoutDragged = current.filter((a) => a.id !== draggedId);
+            const targetIndex = withoutDragged.findIndex((a) => a.id === targetId);
+            if (targetIndex < 0) return current;
+
+            const insertIndex = placement === "after" ? targetIndex + 1 : targetIndex;
+            const next = [...withoutDragged];
+            next.splice(insertIndex, 0, dragged);
+
+            const didChange = next.some((a, idx) => a.id !== current[idx]?.id);
+            if (!didChange) return current;
+
+            localAccountsRef.current = next;
+            return next;
+        });
+    };
+
+    const handleDragOverCard = (e, acc) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+
+        const rect = e.currentTarget.getBoundingClientRect();
+        const relativeX = (e.clientX - rect.left) / rect.width;
+        const relativeY = (e.clientY - rect.top) / rect.height;
+        const placement = relativeY > 0.55 || (relativeY > 0.25 && relativeY < 0.75 && relativeX > 0.5) ? "after" : "before";
+
+        moveDraggedAccount(acc.id, placement);
+    };
+
+    const handleDragStart = (e, acc) => {
+        if (dragArmedId.current !== acc.id) {
+            e.preventDefault();
+            return;
+        }
+        draggingId.current = acc.id;
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", acc.id);
+    };
+
+    const handleDragEnd = () => {
+        draggingId.current = null;
+        dragArmedId.current = null;
+        persistOrder(localAccountsRef.current);
+    };
+
+    const handleDragHandlePointerDown = (acc) => {
+        dragArmedId.current = acc.id;
+    };
+
     // Balance by currency (liquid only), using computed effective balance
     const liquidAccounts = accounts.filter((a) => a.type !== "investment");
     const byCurrency = liquidAccounts.reduce((acc, a) => {
-        const c = a.currency || "MXN";
+        const c = a.currency || "ARS";
         acc[c] = (acc[c] || 0) + computeEffectiveBalance(a);
         return acc;
     }, {});
 
     const totalInDisplayCurrency = liquidAccounts.reduce(
-        (s, a) => s + convert(computeEffectiveBalance(a), a.currency || "MXN"), 0
+        (s, a) => s + convert(computeEffectiveBalance(a), a.currency || "ARS"), 0
     );
     const activeInvestments = investments.filter((i) => !i.status || i.status === "activa");
     const investedTotal = activeInvestments.reduce(
-        (s, i) => s + convert(i.current_value || i.amount_invested || 0, i.currency || "MXN"), 0
+        (s, i) => s + convert(i.current_value || i.amount_invested || 0, i.currency || "ARS"), 0
     );
 
     return (
@@ -160,7 +225,7 @@ export default function Accounts() {
                             <div className="flex flex-wrap gap-1.5 mt-2">
                                 {(() => {
                                     const byC = investments.reduce((acc, i) => {
-                                        const c = i.currency || "MXN";
+                                        const c = i.currency || "ARS";
                                         acc[c] = (acc[c] || 0) + (i.current_value || i.amount_invested || 0);
                                         return acc;
                                     }, {});
@@ -197,8 +262,7 @@ export default function Accounts() {
             </TooltipProvider>
 
             {/* Account cards */}
-            <Reorder.Group as="div" values={localAccounts} onReorder={handleReorder}
-                className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {localAccounts.map((acc, i) => (
                     <SortableAccountCard
                         key={acc.id}
@@ -215,9 +279,13 @@ export default function Accounts() {
                         onMoveUp={() => moveAccount(i, -1)}
                         onMoveDown={() => moveAccount(i, 1)}
                         onDelete={() => deleteMut.mutate(acc.id)}
+                        onDragHandlePointerDown={() => handleDragHandlePointerDown(acc)}
+                        onDragStart={(e) => handleDragStart(e, acc)}
+                        onDragOver={(e) => handleDragOverCard(e, acc)}
+                        onDragEnd={handleDragEnd}
                     />
                 ))}
-            </Reorder.Group>
+            </div>
 
             <AccountFormDialog open={showForm || !!editing} onClose={() => { setShowForm(false); setEditing(null); }}
                 initial={editing} onSubmit={(data) => editing ? updateMut.mutate({ id: editing.id, data }) : createMut.mutate(data)} />
@@ -225,8 +293,7 @@ export default function Accounts() {
     );
 }
 
-function SortableAccountCard({ acc, i, totalCount, investments, computeEffectiveBalance, displayCurrency, convert, onEdit, onFavorite, onToggleVisible, onMoveUp, onMoveDown, onDelete }) {
-    const dragControls = useDragControls();
+function SortableAccountCard({ acc, i, totalCount, investments, computeEffectiveBalance, displayCurrency, convert, onEdit, onFavorite, onToggleVisible, onMoveUp, onMoveDown, onDelete, onDragHandlePointerDown, onDragStart, onDragOver, onDragEnd }) {
     const Icon = iconMap[acc.type] || Wallet;
     const isInvestment = acc.type === "investment";
     const effective = computeEffectiveBalance(acc);
@@ -236,14 +303,22 @@ function SortableAccountCard({ acc, i, totalCount, investments, computeEffective
     const isHidden = acc.is_visible === false;
 
     return (
-        <Reorder.Item value={acc} as="div" dragControls={dragControls} dragListener={false}>
+        <div
+            draggable
+            onDragStart={onDragStart}
+            onDragOver={onDragOver}
+            onDragEnd={onDragEnd}
+            className="min-w-0"
+        >
             <Card className={cn("relative group hover:shadow-lg transition-shadow", isInvestment && "border-chart-2/30", isHidden && "opacity-60")}>
                 <CardContent className="p-5">
                     <div className="flex items-start justify-between">
                         <div className="flex items-center gap-3 min-w-0 flex-1">
                             <div
-                                onPointerDown={(e) => { e.preventDefault(); dragControls.start(e); }}
+                                data-drag-handle
+                                onPointerDown={onDragHandlePointerDown}
                                 className="cursor-grab active:cursor-grabbing touch-none text-muted-foreground/25 hover:text-muted-foreground/60 transition-colors shrink-0"
+                                title="Arrastrar para ordenar"
                             >
                                 <GripVertical className="h-4 w-4" />
                             </div>
@@ -258,7 +333,7 @@ function SortableAccountCard({ acc, i, totalCount, investments, computeEffective
                                 </div>
                                 <div className="flex items-center gap-1.5 mt-0.5">
                                     <Badge variant="secondary" className="text-xs">{ACCOUNT_TYPES[acc.type]}</Badge>
-                                    <Badge variant="outline" className="text-xs font-mono">{acc.currency || "MXN"}</Badge>
+                                    <Badge variant="outline" className="text-xs font-mono">{acc.currency || "ARS"}</Badge>
                                 </div>
                             </div>
                         </div>
@@ -291,28 +366,28 @@ function SortableAccountCard({ acc, i, totalCount, investments, computeEffective
                         </DropdownMenu>
                     </div>
                     <p className={cn("text-2xl font-bold mt-4", effective >= 0 ? "text-foreground" : "text-destructive")}>
-                        {formatCurrency(effective, acc.currency || "MXN")}
+                        {formatCurrency(effective, acc.currency || "ARS")}
                     </p>
-                    {(acc.currency || "MXN") !== displayCurrency && (
+                    {(acc.currency || "ARS") !== displayCurrency && (
                         <p className="text-xs text-muted-foreground mt-0.5">
-                            ≈ {formatCurrency(convert(effective, acc.currency || "MXN"), displayCurrency)}
+                            ≈ {formatCurrency(convert(effective, acc.currency || "ARS"), displayCurrency)}
                         </p>
                     )}
                     {linkedInvs.length > 0 && (
                         <div className="mt-2 pt-2 border-t border-border/50 grid grid-cols-2 gap-x-2 text-xs">
                             <span className="text-muted-foreground">Inversiones activas</span>
-                            <span className="text-right font-medium text-chart-2">{formatCurrency(investedAmt, acc.currency || "MXN")}</span>
+                            <span className="text-right font-medium text-chart-2">{formatCurrency(investedAmt, acc.currency || "ARS")}</span>
                         </div>
                     )}
                 </CardContent>
             </Card>
-        </Reorder.Item>
+        </div>
     );
 }
 
 function AccountFormDialog({ open, onClose, onSubmit, initial }) {
     const { activeCurrencies } = useCurrency();
-    const defaultCurrency = activeCurrencies[0] || "MXN";
+    const defaultCurrency = activeCurrencies[0] || "ARS";
     const [form, setForm] = useState({ name: "", type: "checking", currency: defaultCurrency, balance: 0 });
     useEffect(() => {
         if (initial) setForm({ ...initial, balance: String(initial.balance || 0) });

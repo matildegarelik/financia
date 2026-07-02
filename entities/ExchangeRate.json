@@ -5,7 +5,6 @@
         "from_currency": {
             "type": "string",
             "enum": [
-                "MXN",
                 "USD",
                 "EUR",
                 "ARS",
@@ -18,7 +17,6 @@
         "to_currency": {
             "type": "string",
             "enum": [
-                "MXN",
                 "USD",
                 "EUR",
                 "ARS",

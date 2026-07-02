@@ -1,8 +1,8 @@
-export const CURRENCIES = ["ARS", "USD", "EUR", "MXN"];
+export const CURRENCIES = ["ARS", "USD", "EUR"];
 
 export function formatCurrencyCode(amount, currency = "ARS") {
     try {
-        const locales = { MXN: "es-MX", USD: "en-US", EUR: "es-ES", ARS: "es-AR", COP: "es-CO", CLP: "es-CL", PEN: "es-PE" };
+        const locales = { USD: "en-US", EUR: "es-ES", ARS: "es-AR", COP: "es-CO", CLP: "es-CL", PEN: "es-PE" };
         const loc = locales[currency] || "en-US";
         return new Intl.NumberFormat(loc, {
             style: "currency",
@@ -18,7 +18,7 @@ export function formatCurrencyCode(amount, currency = "ARS") {
 
 export function formatCurrency(amount, currency = "ARS") {
     try {
-        const locales = { MXN: "es-MX", USD: "en-US", EUR: "es-ES", ARS: "es-AR", COP: "es-CO", CLP: "es-CL", PEN: "es-PE" };
+        const locales = {USD: "en-US", EUR: "es-ES", ARS: "es-AR", COP: "es-CO", CLP: "es-CL", PEN: "es-PE" };
         const loc = locales[currency] || "en-US";
         return new Intl.NumberFormat(loc, {
             style: "currency",
@@ -48,7 +48,6 @@ export function getMonthLabel(yyyymm) {
 }
 
 // Convert amount from one currency to another using rates map
-// rates: { "USD_MXN": 17.5, "EUR_MXN": 19.2, ... }
 export function convertCurrency(amount, fromCurrency, toCurrency, rates) {
     if (!fromCurrency || !toCurrency || fromCurrency === toCurrency) return amount || 0;
     if (!rates) return amount || 0;
@@ -56,10 +55,10 @@ export function convertCurrency(amount, fromCurrency, toCurrency, rates) {
     const reverseKey = `${toCurrency}_${fromCurrency}`;
     if (rates[key]) return (amount || 0) * rates[key];
     if (rates[reverseKey]) return (amount || 0) / rates[reverseKey];
-    // Try via MXN as bridge
-    const toMXN = `${fromCurrency}_MXN`;
-    const fromMXN = `MXN_${toCurrency}`;
-    if (rates[toMXN] && rates[fromMXN]) return (amount || 0) * rates[toMXN] * rates[fromMXN];
+    // Try via ARS as bridge
+    const toARS = `${fromCurrency}_ARS`;
+    const fromARS = `ARS_${toCurrency}`;
+    if (rates[toARS] && rates[fromARS]) return (amount || 0) * rates[toARS] * rates[fromARS];
     return amount || 0;
 }
 
@@ -102,3 +101,11 @@ export const TRANSACTION_STATUS = {
 export const TODAY = new Date().toISOString().split("T")[0];
 
 export const isRegularExpense = (tx) => tx.type === "expense" && !tx.is_investment_transfer;
+
+export function getTransferDestinationAmount(tx, destinationCurrency) {
+    if (!tx || tx.type !== "transfer") return 0;
+    if (tx.to_amount != null) return Number(tx.to_amount) || 0;
+    const sourceCurrency = tx.currency || destinationCurrency;
+    const targetCurrency = tx.to_currency || destinationCurrency || sourceCurrency;
+    return sourceCurrency === targetCurrency ? (Number(tx.amount) || 0) : 0;
+}

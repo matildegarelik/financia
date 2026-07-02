@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import PageHeader from "@/components/shared/PageHeader";
 import TransactionForm from "@/components/transactions/TransactionForm";
-import { formatCurrency, formatCurrencyCode, formatDate, TRANSACTION_STATUS, TODAY } from "@/lib/formatters";
+import { formatCurrency, formatCurrencyCode, formatDate, TRANSACTION_STATUS, TODAY, getTransferDestinationAmount } from "@/lib/formatters";
 import { useCurrency } from "@/lib/currency-context";
 import { ArrowDownLeft, ArrowUpRight, ArrowLeftRight } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -222,7 +222,7 @@ export default function Transactions() {
                     if (tx.type === "expense") return sum - (tx.amount || 0);
                     if (tx.type === "transfer") return sum - (tx.amount || 0);
                 }
-                if (tx.to_account_id === acc.id && tx.type === "transfer") return sum + (tx.to_amount || tx.amount || 0);
+                if (tx.to_account_id === acc.id && tx.type === "transfer") return sum + getTransferDestinationAmount(tx, acc.currency);
                 return sum;
             }, acc.balance || 0);
     }
@@ -435,11 +435,11 @@ export default function Transactions() {
                         <p className="text-xs text-muted-foreground px-0.5">
                             Total:{" "}
                             <span className={cn("font-semibold", selectedBalance < 0 ? "text-destructive" : "text-foreground")}>
-                                {formatCurrencyCode(selectedBalance, selectedAccount.currency || "MXN")}
+                                {formatCurrencyCode(selectedBalance, selectedAccount.currency || "ARS")}
                             </span>
-                            {(selectedAccount.currency || "MXN") !== displayCurrency && (
+                            {(selectedAccount.currency || "ARS") !== displayCurrency && (
                                 <span className="ml-1 text-muted-foreground/70">
-                                    ≈ {formatCurrencyCode(convert(selectedBalance, selectedAccount.currency || "MXN"), displayCurrency)}
+                                    ≈ {formatCurrencyCode(convert(selectedBalance, selectedAccount.currency || "ARS"), displayCurrency)}
                                 </span>
                             )}
                         </p>
@@ -484,6 +484,8 @@ export default function Transactions() {
                                 const isFuture = tx.date && tx.date > TODAY;
                                 const hasExtra = tx.project_name || tx.client_name || tx.notes || tx.installment_total;
                                 const isExpanded = expanded[tx.id];
+                                const transferDestinationCurrency = tx.to_currency || accounts.find((a) => a.id === tx.to_account_id)?.currency;
+                                const hasDestinationAmount = tx.type === "transfer" && tx.to_amount != null && transferDestinationCurrency && transferDestinationCurrency !== tx.currency;
 
                                 return (
                                     <div key={tx.id} className={cn("transition-colors", isFuture && "bg-muted/20")}>
@@ -516,11 +518,16 @@ export default function Transactions() {
                                                 <div className="text-right">
                                                     <p className={cn("text-sm font-semibold", cfg.color)}>
                                                         {tx.type === "income" ? "+" : tx.type === "expense" ? "-" : ""}
-                                                        {formatCurrencyCode(tx.amount, tx.currency || "MXN")}
+                                                        {formatCurrencyCode(tx.amount, tx.currency || "ARS")}
                                                     </p>
+                                                    {hasDestinationAmount && (
+                                                        <p className="text-xs font-medium text-chart-2">
+                                                            {"-> "}{formatCurrencyCode(tx.to_amount, transferDestinationCurrency)}
+                                                        </p>
+                                                    )}
                                                     {tx.currency && tx.currency !== displayCurrency && (
                                                         <p className="text-xs text-muted-foreground">
-                                                            ≈ {formatCurrencyCode(convert(tx.amount, tx.currency || "MXN"), displayCurrency)}
+                                                            ≈ {formatCurrencyCode(convert(tx.amount, tx.currency || "ARS"), displayCurrency)}
                                                         </p>
                                                     )}
                                                 </div>

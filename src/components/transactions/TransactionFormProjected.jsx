@@ -19,7 +19,7 @@ export default function TransactionFormProjected({ open, onClose, onSubmit, acco
             type: "income",
             status: "projected",
             amount: "",
-            currency: activeCurrencies[0] || "MXN",
+            currency: activeCurrencies[0] || "ARS",
             description: "",
             category_id: "",
             category_name: "",
@@ -153,7 +153,7 @@ export default function TransactionFormProjected({ open, onClose, onSubmit, acco
                                 <SelectContent>
                                     <SelectItem value="none"><span className="text-muted-foreground">Sin cuenta</span></SelectItem>
                                     {sortedAccounts.map((a) => (
-                                        <SelectItem key={a.id} value={a.id}>{a.name} ({a.currency || "MXN"})</SelectItem>
+                                        <SelectItem key={a.id} value={a.id}>{a.name} ({a.currency || "ARS"})</SelectItem>
                                     ))}
                                 </SelectContent>
                             </Select>

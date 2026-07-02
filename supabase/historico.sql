@@ -2785,8 +2785,8 @@ INSERT INTO transactions
    account_id, account_name, to_account_id, to_account_name)
 VALUES (
   '402ad72e-fbb4-4316-aa69-669dd4296bda', '2023-01-31', 'transfer', 'confirmed',
-  62900.0, 'USD', 172.0, NULL,
-  (SELECT id   FROM accounts WHERE user_id = '402ad72e-fbb4-4316-aa69-669dd4296bda' AND type = 'savings' AND currency = 'USD' LIMIT 1), (SELECT name FROM accounts WHERE user_id = '402ad72e-fbb4-4316-aa69-669dd4296bda' AND type = 'savings' AND currency = 'USD' LIMIT 1), (SELECT id   FROM accounts WHERE user_id = '402ad72e-fbb4-4316-aa69-669dd4296bda' AND name = 'Binance' LIMIT 1), (SELECT name FROM accounts WHERE user_id = '402ad72e-fbb4-4316-aa69-669dd4296bda' AND name = 'Binance' LIMIT 1)
+  62900.0, 'ARS', 172.0, NULL,
+  (SELECT id   FROM accounts WHERE user_id = '402ad72e-fbb4-4316-aa69-669dd4296bda' AND type = 'checking' AND currency = 'ARS' AND name ILIKE 'Banco Macro%' LIMIT 1), (SELECT name FROM accounts WHERE user_id = '402ad72e-fbb4-4316-aa69-669dd4296bda' AND type = 'checking' AND currency = 'ARS' AND name ILIKE 'Banco Macro%' LIMIT 1), (SELECT id   FROM accounts WHERE user_id = '402ad72e-fbb4-4316-aa69-669dd4296bda' AND name = 'Binance' LIMIT 1), (SELECT name FROM accounts WHERE user_id = '402ad72e-fbb4-4316-aa69-669dd4296bda' AND name = 'Binance' LIMIT 1)
 );
 INSERT INTO transactions
   (user_id, date, type, status, amount, currency, to_amount, to_currency,

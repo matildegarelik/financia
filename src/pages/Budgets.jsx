@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import PageHeader from "@/components/shared/PageHeader";
-import { formatCurrency, formatCurrencyCode, isRegularExpense } from "@/lib/formatters";
+import { formatCurrencyCode, isRegularExpense } from "@/lib/formatters";
 import { useCurrency } from "@/lib/currency-context";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
@@ -98,8 +98,8 @@ export default function Budgets() {
 
     const expBudgets = budgets.filter((b) => categories.find((c) => c.id === b.category_id)?.type !== "income");
     const incBudgets = budgets.filter((b) => categories.find((c) => c.id === b.category_id)?.type === "income");
-    const totalBudget = expBudgets.reduce((s, b) => s + convert(b.amount || 0, b.currency || "MXN"), 0);
-    const totalSpent = expBudgets.reduce((s, b) => s + convert(getBudgetProgress(b), b.currency || "MXN"), 0);
+    const totalBudget = expBudgets.reduce((s, b) => s + convert(b.amount || 0, b.currency || "ARS"), 0);
+    const totalSpent = expBudgets.reduce((s, b) => s + convert(getBudgetProgress(b), b.currency || "ARS"), 0);
     const isCurrentMonth = monthKey === toMonthKey(new Date());
 
     return (
@@ -206,12 +206,12 @@ export default function Budgets() {
                                                     </div>
                                                     <Progress value={pct} className={cn(over ? "[&>div]:bg-destructive" : pct > 80 ? "[&>div]:bg-yellow-500" : "[&>div]:bg-primary")} />
                                                     <div className="flex justify-between text-sm">
-                                                        <span className="text-muted-foreground">{formatCurrencyCode(progress, b.currency || "MXN")} gastado</span>
+                                                        <span className="text-muted-foreground">{formatCurrencyCode(progress, b.currency || "ARS")} gastado</span>
                                                         <span className={cn("font-medium", over ? "text-destructive" : "text-primary")}>
-                                                            {over ? `Excedido ${formatCurrencyCode(Math.abs(remaining), b.currency || "MXN")}` : `${formatCurrencyCode(remaining, b.currency || "MXN")} restante`}
+                                                            {over ? `Excedido ${formatCurrencyCode(Math.abs(remaining), b.currency || "ARS")}` : `${formatCurrencyCode(remaining, b.currency || "ARS")} restante`}
                                                         </span>
                                                     </div>
-                                                    <p className="text-xs text-muted-foreground text-right">{pct.toFixed(0)}% de {formatCurrencyCode(b.amount, b.currency || "MXN")}</p>
+                                                    <p className="text-xs text-muted-foreground text-right">{pct.toFixed(0)}% de {formatCurrencyCode(b.amount, b.currency || "ARS")}</p>
                                                 </CardContent>
                                             </Card>
                                         </motion.div>
@@ -242,12 +242,12 @@ export default function Budgets() {
                                                     </div>
                                                     <Progress value={pct} className="[&>div]:bg-primary" />
                                                     <div className="flex justify-between text-sm">
-                                                        <span className="text-muted-foreground">{formatCurrencyCode(received, b.currency || "MXN")} recibido</span>
+                                                        <span className="text-muted-foreground">{formatCurrencyCode(received, b.currency || "ARS")} recibido</span>
                                                         <span className={cn("font-medium", reached ? "text-primary" : "text-muted-foreground")}>
-                                                            {reached ? "Meta alcanzada" : `${formatCurrencyCode(remaining, b.currency || "MXN")} por recibir`}
+                                                            {reached ? "Meta alcanzada" : `${formatCurrencyCode(remaining, b.currency || "ARS")} por recibir`}
                                                         </span>
                                                     </div>
-                                                    <p className="text-xs text-muted-foreground text-right">{pct.toFixed(0)}% de {formatCurrencyCode(b.amount, b.currency || "MXN")}</p>
+                                                    <p className="text-xs text-muted-foreground text-right">{pct.toFixed(0)}% de {formatCurrencyCode(b.amount, b.currency || "ARS")}</p>
                                                 </CardContent>
                                             </Card>
                                         </motion.div>
@@ -273,7 +273,7 @@ export default function Budgets() {
 
 function BudgetFormDialog({ open, onClose, onSubmit, initial, categories, monthKey }) {
     const { activeCurrencies } = useCurrency();
-    const defaultCurrency = activeCurrencies[0] || "MXN";
+    const defaultCurrency = activeCurrencies[0] || "ARS";
     const [form, setForm] = useState({ category_name: "", amount: "", period: "monthly", spent: 0, currency: defaultCurrency });
     useEffect(() => {
         if (initial) setForm({ ...initial, amount: String(initial.amount || ""), currency: initial.currency || defaultCurrency });

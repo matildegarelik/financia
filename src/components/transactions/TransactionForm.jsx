@@ -26,6 +26,7 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
             status: "confirmed",
             amount: "",
             amount_gross: "",
+            to_amount: "",
             currency: defaultAcc?.currency || activeCurrencies[0] || "ARS",
             description: "",
             category_id: "",
@@ -44,7 +45,12 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
             installment_total: "",
             installment_current: "",
             probability: 80,
-            ...(init ? { ...init, amount: String(init.amount || ""), amount_gross: String(init.amount_gross || "") } : {}),
+            ...(init ? {
+                ...init,
+                amount: String(init.amount || ""),
+                amount_gross: String(init.amount_gross || ""),
+                to_amount: String(init.to_amount || ""),
+            } : {}),
         };
     }
 
@@ -72,10 +78,16 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
         e.preventDefault();
         const net = parseFloat(form.amount) || 0;
         const gross = parseFloat(form.amount_gross);
+        const destinationAccount = accounts.find((a) => a.id === form.to_account_id);
+        const destinationCurrency = destinationAccount?.currency || form.currency;
+        const destinationAmount = parseFloat(form.to_amount);
+        const isCrossCurrencyTransfer = form.type === "transfer" && destinationCurrency !== form.currency;
         onSubmit({
             ...form,
             amount: net,
             amount_gross: !isNaN(gross) && gross !== net ? gross : null,
+            to_amount: isCrossCurrencyTransfer ? (!isNaN(destinationAmount) ? destinationAmount : null) : null,
+            to_currency: isCrossCurrencyTransfer ? destinationCurrency : null,
             installment_total: form.installment_total ? parseInt(form.installment_total) : null,
             installment_current: form.installment_current ? parseInt(form.installment_current) : null,
             probability: form.probability ? parseInt(form.probability) : null,
@@ -109,6 +121,9 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
         .sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999));
 
     const isFreelance = form.project_name || form.client_name;
+    const destinationAccount = accounts.find((a) => a.id === form.to_account_id);
+    const destinationCurrency = destinationAccount?.currency || form.currency;
+    const isCrossCurrencyTransfer = form.type === "transfer" && form.to_account_id && destinationCurrency !== form.currency;
 
     return (
         <Dialog open={open} onOpenChange={onClose}>
@@ -152,13 +167,19 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
                             <SelectTrigger><SelectValue placeholder="Seleccionar cuenta" /></SelectTrigger>
                             <SelectContent>
                                 {sortedAccounts.map((a) => (
-                                    <SelectItem key={a.id} value={a.id}>{a.name} ({a.currency || "MXN"})</SelectItem>
+                                    <SelectItem key={a.id} value={a.id}>{a.name} ({a.currency || "ARS"})</SelectItem>
                                 ))}
                             </SelectContent>
                         </Select>
                     </div>
 
                     {/* Amount — divisa heredada de la cuenta */}
+                    <div className="md:hidden">
+                        <Label>Descripción</Label>
+                        <Input placeholder="Descripción" value={form.description}
+                            onChange={(e) => set("description", e.target.value)} />
+                    </div>
+
                     <div className="grid grid-cols-3 gap-2 items-end">
                         <div className="col-span-2">
                             <Label>Monto neto</Label>
@@ -178,7 +199,7 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
                             onChange={(e) => set("amount_gross", e.target.value)} />
                     </div>
 
-                    <div>
+                    <div className="hidden md:block">
                         <Label>Descripción</Label>
                         <Input placeholder="Descripción" value={form.description}
                             onChange={(e) => set("description", e.target.value)} />
@@ -190,16 +211,31 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
                     </div>
 
                     {form.type === "transfer" && (
-                        <div>
-                            <Label>Cuenta destino</Label>
-                            <Select value={form.to_account_id} onValueChange={(v) => handleAccountChange(v, "to")}>
-                                <SelectTrigger><SelectValue placeholder="Seleccionar cuenta destino" /></SelectTrigger>
-                                <SelectContent>
-                                    {sortedAccounts.filter((a) => a.id !== form.account_id).map((a) => (
-                                        <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+                        <div className="space-y-3">
+                            <div>
+                                <Label>Cuenta destino</Label>
+                                <Select value={form.to_account_id} onValueChange={(v) => handleAccountChange(v, "to")}>
+                                    <SelectTrigger><SelectValue placeholder="Seleccionar cuenta destino" /></SelectTrigger>
+                                    <SelectContent>
+                                        {sortedAccounts.filter((a) => a.id !== form.account_id).map((a) => (
+                                            <SelectItem key={a.id} value={a.id}>{a.name} ({a.currency || "ARS"})</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+
+                            {isCrossCurrencyTransfer && (
+                                <div className="grid grid-cols-3 gap-2 items-end">
+                                    <div className="col-span-2">
+                                        <Label>Monto recibido</Label>
+                                        <Input type="number" step="0.01" placeholder="0.00" value={form.to_amount}
+                                            onChange={(e) => set("to_amount", e.target.value)} required />
+                                    </div>
+                                    <div className="h-9 flex items-center justify-center rounded-md border border-input bg-muted/40 px-3 text-sm font-mono font-semibold text-muted-foreground">
+                                        {destinationCurrency}
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     )}
 

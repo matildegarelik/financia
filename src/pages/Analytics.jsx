@@ -4,53 +4,161 @@ import { useQuery } from "@tanstack/react-query";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import PageHeader from "@/components/shared/PageHeader";
 import CurrencySelector from "@/components/shared/CurrencySelector";
 import { useCurrency } from "@/lib/currency-context";
 import { formatCurrency, getMonthLabel, TODAY, isRegularExpense } from "@/lib/formatters";
 import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 
 function getMonthKey(dateStr) {
     return dateStr?.slice(0, 7) || "";
 }
 
+function toISODate(date) {
+    return date.toISOString().split("T")[0];
+}
+
+function getMonthRange(offset = 0) {
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+    const end = new Date(now.getFullYear(), now.getMonth() + offset + 1, 0);
+    const today = new Date(TODAY);
+    return {
+        from: toISODate(start),
+        to: toISODate(end > today ? today : end),
+    };
+}
+
+function getDayLabel(dateStr) {
+    const [, month, day] = dateStr.split("-");
+    return `${day}/${month}`;
+}
+
+function daysBetween(from, to) {
+    if (!from || !to) return 0;
+    return Math.abs((new Date(to) - new Date(from)) / 86400000);
+}
+
 export default function Analytics() {
     const [chartType, setChartType] = useState("bar");
-    const [months, setMonths] = useState("12");
+    const currentRange = getMonthRange(0);
+    const [rangePreset, setRangePreset] = useState("current_month");
+    const [dateFrom, setDateFrom] = useState(currentRange.from);
+    const [dateTo, setDateTo] = useState(currentRange.to);
+    const [categoryMode, setCategoryMode] = useState("all");
+    const [selectedCategoryIds, setSelectedCategoryIds] = useState([]);
     const { displayCurrency, convert } = useCurrency();
 
     const { data: transactions = [], isLoading } = useQuery({
         queryKey: ["transactions"],
         queryFn: () => base44.entities.Transaction.list("-date", 1000),
     });
+    const { data: categories = [] } = useQuery({
+        queryKey: ["categories"],
+        queryFn: () => base44.entities.Category.list(),
+    });
 
-    const data = useMemo(() => {
-        // Only past confirmed/installment transactions
-        const past = transactions.filter(
-            (t) => t.date <= TODAY && (t.status === "confirmed" || t.status === "installment")
+    const handleRangePreset = (value) => {
+        setRangePreset(value);
+        if (value === "current_month") {
+            const range = getMonthRange(0);
+            setDateFrom(range.from);
+            setDateTo(range.to);
+        } else if (value === "previous_month") {
+            const range = getMonthRange(-1);
+            setDateFrom(range.from);
+            setDateTo(range.to);
+        }
+    };
+
+    const handleCategoryMode = (value) => {
+        setCategoryMode(value);
+        if (value !== "custom") setSelectedCategoryIds([]);
+    };
+
+    const toggleCategory = (id) => {
+        setSelectedCategoryIds((current) =>
+            current.includes(id) ? current.filter((catId) => catId !== id) : [...current, id]
         );
+    };
 
-        const byMonth = {};
-        past.forEach((t) => {
-            const m = getMonthKey(t.date);
-            if (!m) return;
-            if (!byMonth[m]) byMonth[m] = { income: 0, expense: 0 };
-            const amt = convert(t.amount || 0, t.currency || "MXN");
-            if (t.type === "income") byMonth[m].income += amt;
-            else if (isRegularExpense(t)) byMonth[m].expense += amt;
+    const selectedCategoryFilter = useMemo(() => {
+        const selected = new Set(selectedCategoryIds);
+        const expandedIds = new Set(selectedCategoryIds);
+        const names = new Set();
+
+        categories.forEach((cat) => {
+            if (selected.has(cat.id)) names.add(cat.name);
+            if (cat.parent_category && selected.has(cat.parent_category)) {
+                expandedIds.add(cat.id);
+                names.add(cat.name);
+            }
         });
 
-        const numMonths = parseInt(months) || 12;
-        const sortedKeys = Object.keys(byMonth).sort().slice(-numMonths);
+        return { ids: expandedIds, names };
+    }, [categories, selectedCategoryIds]);
 
-        return sortedKeys.map((m) => ({
-            month: getMonthLabel(m),
-            key: m,
-            income: Math.round(byMonth[m]?.income || 0),
-            expense: Math.round(byMonth[m]?.expense || 0),
-            saving: Math.round((byMonth[m]?.income || 0) - (byMonth[m]?.expense || 0)),
+    const filteredTransactions = useMemo(() => {
+        return transactions.filter((t) => {
+            if (!t.date || t.date > TODAY) return false;
+            if (t.status !== "confirmed" && t.status !== "installment") return false;
+            if (dateFrom && t.date < dateFrom) return false;
+            if (dateTo && t.date > dateTo) return false;
+            if (categoryMode === "income") return t.type === "income";
+            if (categoryMode === "expense") return isRegularExpense(t);
+            if (categoryMode === "custom") {
+                if (selectedCategoryIds.length === 0) return true;
+                return selectedCategoryFilter.ids.has(t.category_id) || selectedCategoryFilter.names.has(t.category_name);
+            }
+            return true;
+        });
+    }, [transactions, dateFrom, dateTo, categoryMode, selectedCategoryIds, selectedCategoryFilter]);
+
+    const groupByDay = daysBetween(dateFrom, dateTo) <= 62;
+    const selectedCategoryNames = selectedCategoryIds
+        .map((id) => categories.find((cat) => cat.id === id)?.name)
+        .filter(Boolean);
+    const categorySummary = categoryMode === "custom"
+        ? selectedCategoryIds.length > 0
+            ? selectedCategoryIds.length === 1
+                ? selectedCategoryNames[0] || "1 seleccionada"
+                : `${selectedCategoryIds.length} seleccionadas`
+            : "Todas las categorías"
+        : categoryMode === "income"
+            ? "Solo ingresos"
+            : categoryMode === "expense"
+                ? "Solo gastos"
+                : "Todas";
+    const periodLabel = groupByDay ? "día" : "mes";
+
+    const data = useMemo(() => {
+        const byPeriod = {};
+        filteredTransactions.forEach((t) => {
+            const key = groupByDay ? t.date : getMonthKey(t.date);
+            if (!key) return;
+            if (!byPeriod[key]) byPeriod[key] = { income: 0, expense: 0 };
+            const amt = convert(t.amount || 0, t.currency || "ARS");
+            if (t.type === "income") byPeriod[key].income += amt;
+            else if (isRegularExpense(t)) byPeriod[key].expense += amt;
+        });
+
+        const sortedKeys = Object.keys(byPeriod).sort();
+
+        return sortedKeys.map((key) => ({
+            month: groupByDay ? getDayLabel(key) : getMonthLabel(key),
+            key,
+            income: Math.round(byPeriod[key]?.income || 0),
+            expense: Math.round(byPeriod[key]?.expense || 0),
+            saving: Math.round((byPeriod[key]?.income || 0) - (byPeriod[key]?.expense || 0)),
         }));
-    }, [transactions, displayCurrency, months, convert]);
+    }, [filteredTransactions, displayCurrency, convert, groupByDay]);
 
     // Cumulative savings
     const cumulativeData = useMemo(() => {
@@ -68,14 +176,13 @@ export default function Analytics() {
 
     // Top categories
     const byCat = useMemo(() => {
-        const past = transactions.filter((t) => t.date <= TODAY && isRegularExpense(t));
         const map = {};
-        past.forEach((t) => {
+        filteredTransactions.filter(isRegularExpense).forEach((t) => {
             const k = t.category_name || "Sin categoría";
-            map[k] = (map[k] || 0) + convert(t.amount || 0, t.currency || "MXN");
+            map[k] = (map[k] || 0) + convert(t.amount || 0, t.currency || "ARS");
         });
         return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 8);
-    }, [transactions, displayCurrency, convert]);
+    }, [filteredTransactions, displayCurrency, convert]);
 
     if (isLoading) {
         return (
@@ -90,18 +197,103 @@ export default function Analytics() {
 
     return (
         <div className="space-y-5">
-            <div className="flex items-start justify-between gap-3 flex-wrap">
-                <PageHeader title="Estadísticas" description="Historial financiero mensual" />
-                <div className="flex gap-2">
-                    <CurrencySelector />
-                    <select value={months} onChange={(e) => setMonths(e.target.value)}
-                        className="h-8 text-sm border rounded-md px-2 bg-background">
-                        <option value="6">6 meses</option>
-                        <option value="12">12 meses</option>
-                        <option value="24">24 meses</option>
-                    </select>
-                </div>
-            </div>
+            <PageHeader
+                title="Estadísticas"
+                description="Historial financiero por rango y categoría"
+                action={<CurrencySelector />}
+            />
+
+            <Card>
+                <CardContent className="p-3 sm:p-4 space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_auto] gap-3 items-end">
+                        <div>
+                            <Label className="text-xs">Rango</Label>
+                            <Select value={rangePreset} onValueChange={handleRangePreset}>
+                                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="current_month">Este mes</SelectItem>
+                                    <SelectItem value="previous_month">Mes anterior</SelectItem>
+                                    <SelectItem value="custom">Personalizado</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div>
+                            <Label className="text-xs">Categorías</Label>
+                            <Select value={categoryMode} onValueChange={handleCategoryMode}>
+                                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">Todas</SelectItem>
+                                    <SelectItem value="custom">Seleccionar una o varias</SelectItem>
+                                    <SelectItem value="income">Solo ingresos</SelectItem>
+                                    <SelectItem value="expense">Solo gastos</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="text-xs text-muted-foreground lg:text-right">
+                            <span className="font-medium text-foreground">{filteredTransactions.length}</span> movimientos
+                            <span className="hidden lg:inline"> · {categorySummary}</span>
+                        </div>
+                    </div>
+
+                    {rangePreset === "custom" && (
+                        <div className="grid grid-cols-2 gap-3">
+                            <div>
+                                <Label className="text-xs">Desde</Label>
+                                <Input type="date" className="h-9" value={dateFrom}
+                                    onChange={(e) => setDateFrom(e.target.value)} />
+                            </div>
+                            <div>
+                                <Label className="text-xs">Hasta</Label>
+                                <Input type="date" className="h-9" value={dateTo}
+                                    onChange={(e) => setDateTo(e.target.value)} />
+                            </div>
+                        </div>
+                    )}
+
+                    {categoryMode === "custom" && (
+                        <div className="flex items-center gap-2">
+                            <Popover>
+                                <PopoverTrigger asChild>
+                                    <Button variant="outline" size="sm" className="h-8">
+                                        {categorySummary}
+                                    </Button>
+                                </PopoverTrigger>
+                                <PopoverContent align="start" className="w-80 p-2">
+                                    <div className="max-h-72 overflow-y-auto space-y-1">
+                                        {categories.length === 0 ? (
+                                            <p className="text-sm text-muted-foreground p-2">No hay categorías</p>
+                                        ) : categories
+                                            .slice()
+                                            .sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999))
+                                            .map((cat) => (
+                                                <label key={cat.id}
+                                                    className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted cursor-pointer">
+                                                    <Checkbox
+                                                        checked={selectedCategoryIds.includes(cat.id)}
+                                                        onCheckedChange={() => toggleCategory(cat.id)}
+                                                    />
+                                                    <span className="flex-1 truncate">{cat.name}</span>
+                                                    <span className={cn(
+                                                        "text-[10px] uppercase tracking-wide",
+                                                        cat.type === "income" ? "text-primary" : "text-destructive"
+                                                    )}>
+                                                        {cat.type === "income" ? "ingreso" : "gasto"}
+                                                    </span>
+                                                </label>
+                                            ))}
+                                    </div>
+                                </PopoverContent>
+                            </Popover>
+                            {selectedCategoryIds.length > 0 && (
+                                <Button variant="ghost" size="sm" className="h-8 px-2 text-xs"
+                                    onClick={() => setSelectedCategoryIds([])}>
+                                    Limpiar
+                                </Button>
+                            )}
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
 
             {/* Summary cards */}
             <div className="grid grid-cols-3 gap-3">
@@ -123,7 +315,7 @@ export default function Analytics() {
             <Card>
                 <CardHeader className="pb-2">
                     <div className="flex items-center justify-between flex-wrap gap-2">
-                        <CardTitle className="text-base">Ingresos vs Gastos por mes</CardTitle>
+                        <CardTitle className="text-base">Ingresos vs Gastos por {periodLabel}</CardTitle>
                         <Tabs value={chartType} onValueChange={setChartType}>
                             <TabsList className="h-7">
                                 <TabsTrigger value="bar" className="text-xs px-3">Barras</TabsTrigger>
@@ -184,7 +376,7 @@ export default function Analytics() {
             {/* Top expense categories */}
             <Card>
                 <CardHeader className="pb-2">
-                    <CardTitle className="text-base">Top categorías de gasto (historial)</CardTitle>
+                    <CardTitle className="text-base">Top categorías de gasto</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-2">
                     {byCat.length === 0 ? (

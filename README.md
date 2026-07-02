@@ -17,7 +17,7 @@ Vista general del estado financiero: saldo total por moneda, ingresos y gastos d
 
 ### Cuentas
 - Tipos: cuenta corriente, caja de ahorro, tarjeta de crédito, efectivo, inversión y otras
-- Multi-moneda por cuenta (MXN, USD, EUR, ARS, COP, CLP, PEN)
+- Multi-moneda por cuenta (USD, EUR, ARS, COP, CLP, PEN)
 - Saldo en tiempo real, color e ícono personalizables
 - Posibilidad de desactivar cuentas sin eliminarlas
 

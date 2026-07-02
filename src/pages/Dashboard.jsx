@@ -12,7 +12,7 @@ import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import CurrencySelector from "@/components/shared/CurrencySelector";
 import SpendingChart from "@/components/dashboard/SpendingChart";
-import { formatCurrency, formatCurrencyCode, formatDate, getCurrentMonth, TODAY, isRegularExpense } from "@/lib/formatters";
+import { formatCurrencyCode, formatDate, getCurrentMonth, TODAY, isRegularExpense, getTransferDestinationAmount } from "@/lib/formatters";
 import { useCurrency } from "@/lib/currency-context";
 import { cn } from "@/lib/utils";
 import { format as fnsFormat, startOfMonth, endOfMonth } from "date-fns";
@@ -63,11 +63,11 @@ export default function Dashboard() {
         ), [transactions, currentMonth]);
 
     const monthlyIncome = useMemo(() =>
-        monthlyTx.filter((t) => t.type === "income").reduce((s, t) => s + convert(t.amount || 0, t.currency || "MXN"), 0),
+        monthlyTx.filter((t) => t.type === "income").reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0),
         [monthlyTx, convert]);
 
     const monthlyExpense = useMemo(() =>
-        monthlyTx.filter(isRegularExpense).reduce((s, t) => s + convert(t.amount || 0, t.currency || "MXN"), 0),
+        monthlyTx.filter(isRegularExpense).reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0),
         [monthlyTx, convert]);
 
     const netMonth = monthlyIncome - monthlyExpense;
@@ -81,20 +81,20 @@ export default function Dashboard() {
                     if (tx.type === "expense") return sum - (tx.amount || 0);
                     if (tx.type === "transfer") return sum - (tx.amount || 0);
                 }
-                if (tx.to_account_id === acc.id && tx.type === "transfer") return sum + (tx.to_amount || tx.amount || 0);
+                if (tx.to_account_id === acc.id && tx.type === "transfer") return sum + getTransferDestinationAmount(tx, acc.currency);
                 return sum;
             }, acc.balance || 0);
     }
 
     const liquidAccounts = accounts.filter((a) => a.type !== "investment");
     const liquidBalance = useMemo(() =>
-        liquidAccounts.reduce((s, a) => s + convert(computeEffective(a), a.currency || "MXN"), 0),
+        liquidAccounts.reduce((s, a) => s + convert(computeEffective(a), a.currency || "ARS"), 0),
         [accounts, transactions, convert]);
 
     const investedTotal = useMemo(() =>
         investments
             .filter((i) => !i.status || i.status === "activa")
-            .reduce((s, i) => s + convert(i.current_value || i.amount_invested || 0, i.currency || "MXN"), 0),
+            .reduce((s, i) => s + convert(i.current_value || i.amount_invested || 0, i.currency || "ARS"), 0),
         [investments, convert]);
 
     const totalSavings = liquidBalance + investedTotal;
@@ -177,7 +177,7 @@ export default function Dashboard() {
                 <div className="text-right shrink-0">
                     <p className={cn("font-semibold", cfg.color, compact ? "text-sm" : "text-sm")}>
                         {tx.type === "income" ? "+" : tx.type === "expense" ? "−" : ""}
-                        {formatCurrencyCode(tx.amount, tx.currency || "MXN")}
+                        {formatCurrencyCode(tx.amount, tx.currency || "ARS")}
                     </p>
                     {tx.currency && tx.currency !== displayCurrency && (
                         <p className="text-[10px] text-muted-foreground">
@@ -250,11 +250,11 @@ export default function Dashboard() {
                                     <>
                                         <p className="text-xs text-muted-foreground">{activeDashAcc.name}</p>
                                         <p className={cn("text-2xl font-bold", activeDashBalance < 0 ? "text-destructive" : "text-foreground")}>
-                                            {formatCurrencyCode(activeDashBalance, activeDashAcc.currency || "MXN")}
+                                            {formatCurrencyCode(activeDashBalance, activeDashAcc.currency || "ARS")}
                                         </p>
-                                        {(activeDashAcc.currency || "MXN") !== displayCurrency && (
+                                        {(activeDashAcc.currency || "ARS") !== displayCurrency && (
                                             <p className="text-xs text-muted-foreground">
-                                                ≈ {formatCurrencyCode(convert(activeDashBalance, activeDashAcc.currency || "MXN"), displayCurrency)}
+                                                ≈ {formatCurrencyCode(convert(activeDashBalance, activeDashAcc.currency || "ARS"), displayCurrency)}
                                             </p>
                                         )}
                                     </>
@@ -356,11 +356,11 @@ export default function Dashboard() {
                                     <CardContent className="p-3">
                                         <p className="text-xs text-muted-foreground truncate">{acc.name}</p>
                                         <p className={cn("text-base font-bold mt-0.5 truncate", effective < 0 ? "text-destructive" : "text-foreground")}>
-                                            {formatCurrencyCode(effective, acc.currency || "MXN")}
+                                            {formatCurrencyCode(effective, acc.currency || "ARS")}
                                         </p>
-                                        {(acc.currency || "MXN") !== displayCurrency && (
+                                        {(acc.currency || "ARS") !== displayCurrency && (
                                             <p className="text-[10px] text-muted-foreground mt-0.5">
-                                                ≈ {formatCurrencyCode(convert(effective, acc.currency || "MXN"), displayCurrency)}
+                                                ≈ {formatCurrencyCode(convert(effective, acc.currency || "ARS"), displayCurrency)}
                                             </p>
                                         )}
                                     </CardContent>
@@ -398,7 +398,7 @@ export default function Dashboard() {
                                                 <div className="flex items-center justify-between text-xs">
                                                     <span className="font-medium truncate max-w-[60%]">{b.category_name}</span>
                                                     <span className={cn("font-medium", over ? "text-destructive" : "text-muted-foreground")}>
-                                                        {formatCurrencyCode(spent, b.currency || "MXN")} / {formatCurrencyCode(b.amount, b.currency || "MXN")}
+                                                        {formatCurrencyCode(spent, b.currency || "ARS")} / {formatCurrencyCode(b.amount, b.currency || "ARS")}
                                                     </span>
                                                 </div>
                                                 <Progress value={pct}
