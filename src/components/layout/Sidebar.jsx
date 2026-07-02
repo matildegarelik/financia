@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
     LayoutDashboard, ArrowLeftRight, Wallet, PiggyBank,
-    TrendingUp, Tag, BarChart2, Settings, LogOut, X, Wallet as WalletIcon, CloudLightning, MoreHorizontal
+    TrendingUp, Tag, BarChart2, Settings, LogOut, X, Wallet as WalletIcon, CloudLightning, MoreHorizontal, CreditCard
 } from "lucide-react";
 import { supabase } from "@/api/supabaseClient";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ export const navItems = [
     { path: "/", label: "Dashboard", icon: LayoutDashboard },
     { path: "/transactions", label: "Transacciones", icon: ArrowLeftRight },
     { path: "/accounts", label: "Cuentas", icon: Wallet },
+    { path: "/credit-cards", label: "Tarjetas", icon: CreditCard },
     { path: "/budgets", label: "Presupuestos", icon: PiggyBank },
     { path: "/investments", label: "Inversiones", icon: TrendingUp },
     { path: "/categories", label: "Categorías", icon: Tag },

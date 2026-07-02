@@ -100,7 +100,75 @@ export const TRANSACTION_STATUS = {
 
 export const TODAY = new Date().toISOString().split("T")[0];
 
-export const isRegularExpense = (tx) => tx.type === "expense" && !tx.is_investment_transfer;
+export const isRegularExpense = (tx) => tx.type === "expense" && !tx.is_investment_transfer && !tx.is_credit_card_payment;
+
+export const isCreditCardAccount = (account) => account?.type === "credit_card";
+
+export const isCreditCardPayment = (tx) => Boolean(tx?.is_credit_card_payment);
+
+function clampDay(year, monthIndex, day) {
+    const last = new Date(year, monthIndex + 1, 0).getDate();
+    return Math.min(Math.max(parseInt(day) || 1, 1), last);
+}
+
+function isoFromParts(year, monthIndex, day) {
+    const d = new Date(year, monthIndex, clampDay(year, monthIndex, day));
+    return d.toISOString().split("T")[0];
+}
+
+export function addDaysISO(dateStr, days) {
+    const d = new Date(`${dateStr}T12:00:00`);
+    d.setDate(d.getDate() + days);
+    return d.toISOString().split("T")[0];
+}
+
+export function addMonthsISO(dateStr, months) {
+    const d = new Date(`${dateStr}T12:00:00`);
+    const day = d.getDate();
+    d.setDate(1);
+    d.setMonth(d.getMonth() + months);
+    d.setDate(Math.min(day, new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()));
+    return d.toISOString().split("T")[0];
+}
+
+export function getCreditCardStatementRange(account, referenceDate = TODAY) {
+    const closeDay = parseInt(account?.statement_close_day) || 25;
+    const dueDay = parseInt(account?.statement_due_day) || Math.min(closeDay + 10, 28);
+    const ref = new Date(`${referenceDate}T12:00:00`);
+    const refDay = ref.getDate();
+    const closeMonthOffset = refDay <= closeDay ? 0 : 1;
+    const closeBase = new Date(ref.getFullYear(), ref.getMonth() + closeMonthOffset, 1);
+    const closeDate = isoFromParts(closeBase.getFullYear(), closeBase.getMonth(), closeDay);
+    const prevCloseBase = new Date(closeBase.getFullYear(), closeBase.getMonth() - 1, 1);
+    const prevCloseDate = isoFromParts(prevCloseBase.getFullYear(), prevCloseBase.getMonth(), closeDay);
+    const periodStart = addDaysISO(prevCloseDate, 1);
+    const dueBaseOffset = dueDay <= closeDay ? 1 : 0;
+    const dueBase = new Date(closeBase.getFullYear(), closeBase.getMonth() + dueBaseOffset, 1);
+
+    return {
+        period_start: periodStart,
+        period_end: closeDate,
+        close_date: closeDate,
+        due_date: isoFromParts(dueBase.getFullYear(), dueBase.getMonth(), dueDay),
+    };
+}
+
+export function getPreviousCreditCardStatementRange(account, referenceDate = TODAY) {
+    const current = getCreditCardStatementRange(account, referenceDate);
+    return getCreditCardStatementRange(account, addDaysISO(current.period_start, -1));
+}
+
+export function transactionMatchesStatement(tx, statement) {
+    const date = tx.date;
+    return Boolean(
+        tx.type === "expense" &&
+        !isCreditCardPayment(tx) &&
+        date &&
+        date >= statement.period_start &&
+        date <= statement.period_end &&
+        tx.account_id === statement.account_id
+    );
+}
 
 export function getTransferDestinationAmount(tx, destinationCurrency) {
     if (!tx || tx.type !== "transfer") return 0;

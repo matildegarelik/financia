@@ -47,6 +47,22 @@
         "is_active": {
             "type": "boolean",
             "default": true
+        },
+        "statement_close_day": {
+            "type": "number",
+            "description": "Dia de cierre de resumen para tarjetas de credito"
+        },
+        "statement_due_day": {
+            "type": "number",
+            "description": "Dia de vencimiento de resumen para tarjetas de credito"
+        },
+        "default_payment_account_id": {
+            "type": "string",
+            "description": "Cuenta desde la que se paga la tarjeta por defecto"
+        },
+        "credit_limit": {
+            "type": "number",
+            "description": "Limite opcional de la tarjeta"
         }
     },
     "required": [

@@ -1,0 +1,58 @@
+{
+    "name": "CreditCardStatement",
+    "type": "object",
+    "properties": {
+        "account_id": {
+            "type": "string"
+        },
+        "period_start": {
+            "type": "string",
+            "format": "date"
+        },
+        "period_end": {
+            "type": "string",
+            "format": "date"
+        },
+        "close_date": {
+            "type": "string",
+            "format": "date"
+        },
+        "due_date": {
+            "type": "string",
+            "format": "date"
+        },
+        "total_amount": {
+            "type": "number"
+        },
+        "currency": {
+            "type": "string",
+            "default": "ARS"
+        },
+        "status": {
+            "type": "string",
+            "enum": [
+                "open",
+                "closed",
+                "paid"
+            ],
+            "default": "open"
+        },
+        "payment_account_id": {
+            "type": "string"
+        },
+        "payment_transaction_id": {
+            "type": "string"
+        },
+        "notes": {
+            "type": "string"
+        }
+    },
+    "required": [
+        "account_id",
+        "period_start",
+        "period_end",
+        "close_date",
+        "due_date",
+        "total_amount"
+    ]
+}

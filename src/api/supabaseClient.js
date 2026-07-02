@@ -57,4 +57,5 @@ export const entities = {
     Category: createEntityClient('categories'),
     Investment: createEntityClient('investments'),
     ExchangeRate: createEntityClient('exchange_rates'),
+    CreditCardStatement: createEntityClient('credit_card_statements'),
 };

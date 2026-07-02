@@ -288,6 +288,7 @@ export default function Accounts() {
             </div>
 
             <AccountFormDialog open={showForm || !!editing} onClose={() => { setShowForm(false); setEditing(null); }}
+                accounts={accounts}
                 initial={editing} onSubmit={(data) => editing ? updateMut.mutate({ id: editing.id, data }) : createMut.mutate(data)} />
         </div>
     );
@@ -385,21 +386,59 @@ function SortableAccountCard({ acc, i, totalCount, investments, computeEffective
     );
 }
 
-function AccountFormDialog({ open, onClose, onSubmit, initial }) {
+function AccountFormDialog({ open, onClose, onSubmit, initial, accounts = [] }) {
     const { activeCurrencies } = useCurrency();
     const defaultCurrency = activeCurrencies[0] || "ARS";
-    const [form, setForm] = useState({ name: "", type: "checking", currency: defaultCurrency, balance: 0 });
+    const [form, setForm] = useState({
+        name: "",
+        type: "checking",
+        currency: defaultCurrency,
+        balance: 0,
+        statement_close_day: "",
+        statement_due_day: "",
+        default_payment_account_id: "",
+        credit_limit: "",
+    });
     useEffect(() => {
-        if (initial) setForm({ ...initial, balance: String(initial.balance || 0) });
-        else setForm({ name: "", type: "checking", currency: defaultCurrency, balance: 0 });
+        if (initial) setForm({
+            ...initial,
+            balance: String(initial.balance || 0),
+            statement_close_day: initial.statement_close_day ? String(initial.statement_close_day) : "",
+            statement_due_day: initial.statement_due_day ? String(initial.statement_due_day) : "",
+            default_payment_account_id: initial.default_payment_account_id || "",
+            credit_limit: initial.credit_limit ? String(initial.credit_limit) : "",
+        });
+        else setForm({
+            name: "",
+            type: "checking",
+            currency: defaultCurrency,
+            balance: 0,
+            statement_close_day: "",
+            statement_due_day: "",
+            default_payment_account_id: "",
+            credit_limit: "",
+        });
     }, [initial, open]);
     const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+    const paymentAccounts = accounts.filter((a) => a.id !== initial?.id && a.type !== "credit_card" && a.type !== "investment");
+
+    const submit = (e) => {
+        e.preventDefault();
+        onSubmit({
+            ...form,
+            balance: parseFloat(form.balance) || 0,
+            statement_close_day: form.type === "credit_card" && form.statement_close_day ? parseInt(form.statement_close_day) : null,
+            statement_due_day: form.type === "credit_card" && form.statement_due_day ? parseInt(form.statement_due_day) : null,
+            default_payment_account_id: form.type === "credit_card" ? (form.default_payment_account_id || null) : null,
+            credit_limit: form.type === "credit_card" && form.credit_limit ? parseFloat(form.credit_limit) : null,
+        });
+    };
 
     return (
         <Dialog open={open} onOpenChange={onClose}>
             <DialogContent className="max-w-sm">
                 <DialogHeader><DialogTitle>{initial ? "Editar" : "Nueva"} cuenta</DialogTitle></DialogHeader>
-                <form onSubmit={(e) => { e.preventDefault(); onSubmit({ ...form, balance: parseFloat(form.balance) || 0 }); }} className="space-y-4">
+                <form onSubmit={submit} className="space-y-4">
                     <div><Label>Nombre</Label><Input value={form.name} onChange={(e) => set("name", e.target.value)} required /></div>
                     <div><Label>Tipo</Label>
                         <Select value={form.type} onValueChange={(v) => set("type", v)}>
@@ -422,6 +461,39 @@ function AccountFormDialog({ open, onClose, onSubmit, initial }) {
                         <p className="text-xs text-muted-foreground mb-1">Saldo antes de tus primeras transacciones registradas</p>
                         <Input type="number" step="0.01" value={form.balance} onChange={(e) => set("balance", e.target.value)} />
                     </div>
+                    {form.type === "credit_card" && (
+                        <div className="space-y-3 rounded-lg border border-border/60 bg-muted/20 p-3">
+                            <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                    <Label className="text-xs">Dia de cierre</Label>
+                                    <Input type="number" min="1" max="31" value={form.statement_close_day}
+                                        onChange={(e) => set("statement_close_day", e.target.value)} placeholder="25" />
+                                </div>
+                                <div>
+                                    <Label className="text-xs">Dia de vencimiento</Label>
+                                    <Input type="number" min="1" max="31" value={form.statement_due_day}
+                                        onChange={(e) => set("statement_due_day", e.target.value)} placeholder="10" />
+                                </div>
+                            </div>
+                            <div>
+                                <Label className="text-xs">Cuenta de pago</Label>
+                                <Select value={form.default_payment_account_id || "none"} onValueChange={(v) => set("default_payment_account_id", v === "none" ? "" : v)}>
+                                    <SelectTrigger><SelectValue placeholder="Seleccionar cuenta" /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="none">Sin cuenta predeterminada</SelectItem>
+                                        {paymentAccounts.map((a) => (
+                                            <SelectItem key={a.id} value={a.id}>{a.name} ({a.currency || "ARS"})</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div>
+                                <Label className="text-xs">Limite opcional</Label>
+                                <Input type="number" step="0.01" value={form.credit_limit}
+                                    onChange={(e) => set("credit_limit", e.target.value)} placeholder="0.00" />
+                            </div>
+                        </div>
+                    )}
                     <div className="flex gap-3">
                         <Button type="button" variant="outline" className="flex-1" onClick={onClose}>Cancelar</Button>
                         <Button type="submit" className="flex-1">{initial ? "Guardar" : "Crear"}</Button>

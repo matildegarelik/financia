@@ -1,60 +1,116 @@
 {
-    "name": "Investment",
+    "name": "Transaction",
     "type": "object",
     "properties": {
-        "name": {
+        "date": {
             "type": "string",
-            "description": "Nombre de la inversi\u00f3n"
+            "format": "date"
         },
         "type": {
             "type": "string",
             "enum": [
-                "stocks",
-                "bonds",
-                "crypto",
-                "real_estate",
-                "mutual_fund",
-                "etf",
-                "cetes",
-                "other"
+                "income",
+                "expense",
+                "transfer"
             ],
-            "description": "Tipo de inversi\u00f3n"
+            "default": "expense"
         },
-        "platform": {
+        "status": {
             "type": "string",
-            "description": "Plataforma o broker"
+            "enum": [
+                "confirmed",
+                "installment",
+                "projected"
+            ],
+            "default": "confirmed"
         },
-        "amount_invested": {
-            "type": "number",
-            "description": "Monto invertido"
+        "amount": {
+            "type": "number"
         },
-        "current_value": {
-            "type": "number",
-            "description": "Valor actual"
+        "amount_gross": {
+            "type": "number"
         },
         "currency": {
             "type": "string",
-            "enum": [
-                "USD",
-                "EUR"
-            ],
-            "default": "USD"
+            "default": "ARS"
+        },
+        "to_amount": {
+            "type": "number"
+        },
+        "to_currency": {
+            "type": "string"
+        },
+        "description": {
+            "type": "string"
+        },
+        "account_id": {
+            "type": "string"
+        },
+        "account_name": {
+            "type": "string"
+        },
+        "to_account_id": {
+            "type": "string"
+        },
+        "to_account_name": {
+            "type": "string"
+        },
+        "category_id": {
+            "type": "string"
+        },
+        "category_name": {
+            "type": "string"
+        },
+        "notes": {
+            "type": "string"
+        },
+        "is_recurring": {
+            "type": "boolean",
+            "default": false
+        },
+        "recurring_frequency": {
+            "type": "string"
+        },
+        "installment_total": {
+            "type": "number"
+        },
+        "installment_current": {
+            "type": "number"
+        },
+        "project_name": {
+            "type": "string"
+        },
+        "client_name": {
+            "type": "string"
+        },
+        "probability": {
+            "type": "number"
+        },
+        "due_date": {
+            "type": "string",
+            "format": "date"
+        },
+        "is_investment_transfer": {
+            "type": "boolean",
+            "default": false
+        },
+        "credit_card_statement_id": {
+            "type": "string"
         },
         "purchase_date": {
             "type": "string",
             "format": "date"
         },
-        "notes": {
+        "installment_group_id": {
             "type": "string"
         },
-        "is_active": {
+        "is_credit_card_payment": {
             "type": "boolean",
-            "default": true
+            "default": false
         }
     },
     "required": [
-        "name",
         "type",
-        "amount_invested"
+        "amount"
     ]
 }

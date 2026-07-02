@@ -152,7 +152,7 @@ export default function Transactions() {
             if (advAccFilter !== "all") {
                 q = q.or(`account_id.eq.${advAccFilter},to_account_id.eq.${advAccFilter}`);
             } else if (accountTab !== "all") {
-                q = q.eq("account_id", accountTab);
+                q = q.or(`account_id.eq.${accountTab},to_account_id.eq.${accountTab}`);
             }
 
             if (datePreset === "no_date") {
@@ -484,8 +484,11 @@ export default function Transactions() {
                                 const isFuture = tx.date && tx.date > TODAY;
                                 const hasExtra = tx.project_name || tx.client_name || tx.notes || tx.installment_total;
                                 const isExpanded = expanded[tx.id];
-                                const transferDestinationCurrency = tx.to_currency || accounts.find((a) => a.id === tx.to_account_id)?.currency;
-                                const hasDestinationAmount = tx.type === "transfer" && tx.to_amount != null && transferDestinationCurrency && transferDestinationCurrency !== tx.currency;
+                                const transferDestinationCurrency = tx.to_currency || accounts.find((a) => a.id === tx.to_account_id)?.currency || tx.currency || "ARS";
+                                const transferDestinationAmount = getTransferDestinationAmount(tx, transferDestinationCurrency);
+                                const transferAccountLine = tx.type === "transfer"
+                                    ? `De ${tx.account_name || "cuenta origen"} a ${tx.to_account_name || "cuenta destino"}`
+                                    : null;
 
                                 return (
                                     <div key={tx.id} className={cn("transition-colors", isFuture && "bg-muted/20")}>
@@ -510,24 +513,27 @@ export default function Transactions() {
                                                         {tx.date ? formatDate(tx.date) : "Sin fecha"}
                                                     </span>
                                                     {tx.category_name && ` · ${tx.category_name}`}
-                                                    {tx.account_name && ` · ${tx.account_name}`}
+                                                    {transferAccountLine ? ` · ${transferAccountLine}` : tx.account_name && ` · ${tx.account_name}`}
                                                     {tx.installment_current && tx.installment_total && ` · Cuota ${tx.installment_current}/${tx.installment_total}`}
                                                 </p>
                                             </div>
                                             <div className="flex items-center gap-2 flex-shrink-0">
                                                 <div className="text-right">
-                                                    <p className={cn("text-sm font-semibold", cfg.color)}>
-                                                        {tx.type === "income" ? "+" : tx.type === "expense" ? "-" : ""}
-                                                        {formatCurrencyCode(tx.amount, tx.currency || "ARS")}
-                                                    </p>
-                                                    {hasDestinationAmount && (
-                                                        <p className="text-xs font-medium text-chart-2">
-                                                            {"-> "}{formatCurrencyCode(tx.to_amount, transferDestinationCurrency)}
-                                                        </p>
-                                                    )}
-                                                    {tx.currency && tx.currency !== displayCurrency && (
-                                                        <p className="text-xs text-muted-foreground">
-                                                            ≈ {formatCurrencyCode(convert(tx.amount, tx.currency || "ARS"), displayCurrency)}
+                                                    {tx.type === "transfer" ? (
+                                                        <div className="space-y-0.5">
+                                                            <p className="text-sm font-semibold text-destructive flex items-center justify-end gap-1">
+                                                                <ArrowUpRight className="h-3.5 w-3.5" />
+                                                                -{formatCurrencyCode(tx.amount, tx.currency || "ARS")}
+                                                            </p>
+                                                            <p className="text-sm font-semibold text-primary flex items-center justify-end gap-1">
+                                                                <ArrowDownLeft className="h-3.5 w-3.5" />
+                                                                +{formatCurrencyCode(transferDestinationAmount, transferDestinationCurrency)}
+                                                            </p>
+                                                        </div>
+                                                    ) : (
+                                                        <p className={cn("text-sm font-semibold", cfg.color)}>
+                                                            {tx.type === "income" ? "+" : tx.type === "expense" ? "-" : ""}
+                                                            {formatCurrencyCode(tx.amount, tx.currency || "ARS")}
                                                         </p>
                                                     )}
                                                 </div>

@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery } from "@tanstack/react-query";
-import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -36,6 +36,23 @@ function getMonthRange(offset = 0) {
     };
 }
 
+function getRollingRange(months) {
+    const now = new Date();
+    const from = new Date(now.getFullYear(), now.getMonth() - months + 1, 1);
+    return { from: toISODate(from), to: TODAY };
+}
+
+function getYearRange(offset = 0) {
+    const now = new Date();
+    const year = now.getFullYear() + offset;
+    const end = new Date(year, 11, 31);
+    const today = new Date(TODAY);
+    return {
+        from: `${year}-01-01`,
+        to: toISODate(end > today ? today : end),
+    };
+}
+
 function getDayLabel(dateStr) {
     const [, month, day] = dateStr.split("-");
     return `${day}/${month}`;
@@ -64,15 +81,23 @@ export default function Analytics() {
         queryKey: ["categories"],
         queryFn: () => base44.entities.Category.list(),
     });
+    const { data: accounts = [] } = useQuery({
+        queryKey: ["accounts"],
+        queryFn: () => base44.entities.Account.list(),
+    });
 
     const handleRangePreset = (value) => {
         setRangePreset(value);
-        if (value === "current_month") {
-            const range = getMonthRange(0);
-            setDateFrom(range.from);
-            setDateTo(range.to);
-        } else if (value === "previous_month") {
-            const range = getMonthRange(-1);
+        const ranges = {
+            current_month: getMonthRange(0),
+            previous_month: getMonthRange(-1),
+            last_3_months: getRollingRange(3),
+            last_6_months: getRollingRange(6),
+            current_year: getYearRange(0),
+            previous_year: getYearRange(-1),
+        };
+        if (ranges[value]) {
+            const range = ranges[value];
             setDateFrom(range.from);
             setDateTo(range.to);
         }
@@ -184,6 +209,33 @@ export default function Analytics() {
         return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 8);
     }, [filteredTransactions, displayCurrency, convert]);
 
+    const cardAccountIds = useMemo(
+        () => new Set(accounts.filter((a) => a.type === "credit_card").map((a) => a.id)),
+        [accounts]
+    );
+
+    const paymentMethodData = useMemo(() => {
+        const totals = { card: 0, other: 0 };
+        filteredTransactions.filter(isRegularExpense).forEach((t) => {
+            const amt = convert(t.amount || 0, t.currency || "ARS");
+            if (cardAccountIds.has(t.account_id)) totals.card += amt;
+            else totals.other += amt;
+        });
+        return [
+            { name: "Tarjeta", value: Math.round(totals.card), color: "hsl(199, 89%, 48%)" },
+            { name: "Otros medios", value: Math.round(totals.other), color: "hsl(160, 84%, 28%)" },
+        ].filter((d) => d.value > 0);
+    }, [filteredTransactions, cardAccountIds, convert, displayCurrency]);
+
+    const topDescriptions = useMemo(() => {
+        const map = {};
+        filteredTransactions.filter(isRegularExpense).forEach((t) => {
+            const key = (t.description || "Sin descripcion").trim();
+            map[key] = (map[key] || 0) + convert(t.amount || 0, t.currency || "ARS");
+        });
+        return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 6);
+    }, [filteredTransactions, convert, displayCurrency]);
+
     if (isLoading) {
         return (
             <div className="space-y-6">
@@ -213,6 +265,10 @@ export default function Analytics() {
                                 <SelectContent>
                                     <SelectItem value="current_month">Este mes</SelectItem>
                                     <SelectItem value="previous_month">Mes anterior</SelectItem>
+                                    <SelectItem value="last_3_months">Ultimos 3 meses</SelectItem>
+                                    <SelectItem value="last_6_months">Ultimos 6 meses</SelectItem>
+                                    <SelectItem value="current_year">Este ano</SelectItem>
+                                    <SelectItem value="previous_year">Ano pasado</SelectItem>
                                     <SelectItem value="custom">Personalizado</SelectItem>
                                 </SelectContent>
                             </Select>
@@ -398,6 +454,45 @@ export default function Analytics() {
                     })}
                 </CardContent>
             </Card>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <Card>
+                    <CardHeader className="pb-2">
+                        <CardTitle className="text-base">Tarjeta vs otros medios</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        {paymentMethodData.length === 0 ? (
+                            <p className="text-sm text-muted-foreground text-center py-10">Sin datos</p>
+                        ) : (
+                            <ResponsiveContainer width="100%" height={220}>
+                                <PieChart>
+                                    <Pie data={paymentMethodData} dataKey="value" nameKey="name" innerRadius={55} outerRadius={82} paddingAngle={3}>
+                                        {paymentMethodData.map((entry) => <Cell key={entry.name} fill={entry.color} />)}
+                                    </Pie>
+                                    <Tooltip formatter={(v) => formatCurrency(v, displayCurrency)} />
+                                    <Legend />
+                                </PieChart>
+                            </ResponsiveContainer>
+                        )}
+                    </CardContent>
+                </Card>
+
+                <Card>
+                    <CardHeader className="pb-2">
+                        <CardTitle className="text-base">Top comercios/descripciones</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                        {topDescriptions.length === 0 ? (
+                            <p className="text-sm text-muted-foreground text-center py-10">Sin datos</p>
+                        ) : topDescriptions.map(([label, value]) => (
+                            <div key={label} className="flex items-center justify-between gap-3 text-sm">
+                                <span className="truncate">{label}</span>
+                                <span className="font-medium shrink-0">{formatCurrency(value, displayCurrency)}</span>
+                            </div>
+                        ))}
+                    </CardContent>
+                </Card>
+            </div>
         </div>
     );
 }

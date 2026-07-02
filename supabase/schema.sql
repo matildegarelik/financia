@@ -18,6 +18,10 @@ create table accounts (
     color text,
     icon text,
     is_active boolean default true,
+    statement_close_day integer,
+    statement_due_day integer,
+    default_payment_account_id uuid,
+    credit_limit numeric,
     created_at timestamptz default now()
 );
 
@@ -59,8 +63,33 @@ create table transactions (
     client_name text,
     probability numeric,
     due_date text,
+    is_investment_transfer boolean default false,
+    credit_card_statement_id uuid,
+    purchase_date text,
+    installment_group_id text,
+    is_credit_card_payment boolean default false,
     created_at timestamptz default now()
 );
+
+create table credit_card_statements (
+    id uuid default uuid_generate_v4() primary key,
+    user_id uuid references auth.users(id) on delete cascade not null,
+    account_id uuid not null,
+    period_start text not null,
+    period_end text not null,
+    close_date text not null,
+    due_date text not null,
+    total_amount numeric not null default 0,
+    currency text not null default 'ARS',
+    status text not null default 'open' check (status in ('open', 'closed', 'paid')),
+    payment_account_id uuid,
+    payment_transaction_id uuid,
+    notes text,
+    created_at timestamptz default now()
+);
+
+create unique index credit_card_statements_user_account_period_idx
+    on credit_card_statements (user_id, account_id, period_start, period_end);
 
 create table budgets (
     id uuid default uuid_generate_v4() primary key,
@@ -112,6 +141,7 @@ alter table transactions enable row level security;
 alter table budgets enable row level security;
 alter table investments enable row level security;
 alter table exchange_rates enable row level security;
+alter table credit_card_statements enable row level security;
 
 -- Políticas: cada usuario solo ve y modifica sus propios registros
 create policy "accounts: own rows" on accounts
@@ -135,6 +165,10 @@ create policy "investments: own rows" on investments
     with check (auth.uid() = user_id);
 
 create policy "exchange_rates: own rows" on exchange_rates
+    using (auth.uid() = user_id)
+    with check (auth.uid() = user_id);
+
+create policy "credit_card_statements: own rows" on credit_card_statements
     using (auth.uid() = user_id)
     with check (auth.uid() = user_id);
 
@@ -167,3 +201,6 @@ create trigger set_user_id_investments
 
 create trigger set_user_id_exchange_rates
     before insert on exchange_rates for each row execute function set_user_id();
+
+create trigger set_user_id_credit_card_statements
+    before insert on credit_card_statements for each row execute function set_user_id();

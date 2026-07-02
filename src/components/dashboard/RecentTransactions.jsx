@@ -1,10 +1,9 @@
 import React from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { formatCurrency, formatDate } from "@/lib/formatters";
+import { formatCurrency, formatDate, getTransferDestinationAmount } from "@/lib/formatters";
 import { ArrowDownLeft, ArrowUpRight, ArrowLeftRight } from "lucide-react";
 import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { useCurrency } from "@/lib/currency-context";
 
 const typeConfig = {
     income: { icon: ArrowDownLeft, label: "Ingreso", color: "text-primary", bg: "bg-primary/10" },
@@ -13,7 +12,6 @@ const typeConfig = {
 };
 
 export default function RecentTransactions({ transactions }) {
-    const { displayCurrency, convert } = useCurrency();
     return (
         <Card>
             <CardHeader className="flex flex-row items-center justify-between">
@@ -22,12 +20,18 @@ export default function RecentTransactions({ transactions }) {
             </CardHeader>
             <CardContent>
                 {transactions.length === 0 ? (
-                    <p className="text-center text-muted-foreground text-sm py-8">No hay transacciones aún</p>
+                    <p className="text-center text-muted-foreground text-sm py-8">No hay transacciones aun</p>
                 ) : (
                     <div className="space-y-1">
                         {transactions.map((tx) => {
                             const cfg = typeConfig[tx.type] || typeConfig.expense;
                             const Icon = cfg.icon;
+                            const transferDestinationCurrency = tx.to_currency || tx.currency || "ARS";
+                            const transferDestinationAmount = getTransferDestinationAmount(tx, transferDestinationCurrency);
+                            const transferAccountLine = tx.type === "transfer"
+                                ? `De ${tx.account_name || "cuenta origen"} a ${tx.to_account_name || "cuenta destino"}`
+                                : null;
+
                             return (
                                 <div key={tx.id} className="flex items-center gap-3 py-2.5 px-2 rounded-lg hover:bg-muted/50 transition-colors">
                                     <div className={cn("p-2 rounded-lg", cfg.bg)}>
@@ -36,17 +40,26 @@ export default function RecentTransactions({ transactions }) {
                                     <div className="flex-1 min-w-0">
                                         <p className="text-sm font-medium truncate">{tx.description || cfg.label}</p>
                                         <p className="text-xs text-muted-foreground">
-                                            {tx.category_name && `${tx.category_name} · `}{tx.account_name || ""} · {formatDate(tx.date)}
+                                            {tx.category_name && `${tx.category_name} - `}
+                                            {transferAccountLine || tx.account_name || ""} - {formatDate(tx.date)}
                                         </p>
                                     </div>
                                     <div className="text-right">
-                                        <span className={cn("text-sm font-semibold block", cfg.color)}>
-                                            {tx.type === "income" ? "+" : tx.type === "expense" ? "-" : ""}
-                                            {formatCurrency(tx.amount, tx.currency || "ARS")}
-                                        </span>
-                                        {tx.currency && tx.currency !== displayCurrency && (
-                                            <span className="text-xs text-muted-foreground">
-                                                ≈ {formatCurrency(convert(tx.amount, tx.currency || "ARS"), displayCurrency)}
+                                        {tx.type === "transfer" ? (
+                                            <div className="space-y-0.5">
+                                                <span className="text-sm font-semibold text-destructive flex items-center justify-end gap-1">
+                                                    <ArrowUpRight className="h-3.5 w-3.5" />
+                                                    -{formatCurrency(tx.amount, tx.currency || "ARS")}
+                                                </span>
+                                                <span className="text-sm font-semibold text-primary flex items-center justify-end gap-1">
+                                                    <ArrowDownLeft className="h-3.5 w-3.5" />
+                                                    +{formatCurrency(transferDestinationAmount, transferDestinationCurrency)}
+                                                </span>
+                                            </div>
+                                        ) : (
+                                            <span className={cn("text-sm font-semibold block", cfg.color)}>
+                                                {tx.type === "income" ? "+" : tx.type === "expense" ? "-" : ""}
+                                                {formatCurrency(tx.amount, tx.currency || "ARS")}
                                             </span>
                                         )}
                                     </div>

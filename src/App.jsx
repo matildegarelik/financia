@@ -23,6 +23,7 @@ import Categories from "./pages/Categories";
 import Analytics from "./pages/Analytics";
 import Settings from "./pages/Settings";
 import Projected from "./pages/Projected";
+import CreditCards from "./pages/CreditCards";
 
 const AuthenticatedApp = () => {
     const { isLoadingAuth, isLoadingPublicSettings, authError, navigateToLogin } = useAuth();
@@ -54,6 +55,7 @@ const AuthenticatedApp = () => {
                     <Route path="/" element={<Dashboard />} />
                     <Route path="/transactions" element={<Transactions />} />
                     <Route path="/accounts" element={<Accounts />} />
+                    <Route path="/credit-cards" element={<CreditCards />} />
                     <Route path="/budgets" element={<Budgets />} />
                     <Route path="/investments" element={<Investments />} />
                     <Route path="/categories" element={<Categories />} />

@@ -9,6 +9,11 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ChevronDown } from "lucide-react";
 import { useCurrency } from "@/lib/currency-context";
 
+function makeGroupId() {
+    if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+    return `installments-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 export default function TransactionForm({ open, onClose, onSubmit, accounts = [], categories = [], initial }) {
     const { activeCurrencies } = useCurrency();
     const [form, setForm] = useState(() => getDefault(initial));
@@ -79,17 +84,25 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
         const net = parseFloat(form.amount) || 0;
         const gross = parseFloat(form.amount_gross);
         const destinationAccount = accounts.find((a) => a.id === form.to_account_id);
+        const sourceAccount = accounts.find((a) => a.id === form.account_id);
         const destinationCurrency = destinationAccount?.currency || form.currency;
         const destinationAmount = parseFloat(form.to_amount);
         const isCrossCurrencyTransfer = form.type === "transfer" && destinationCurrency !== form.currency;
+        const installmentTotal = form.installment_total ? parseInt(form.installment_total) : null;
+        const isCreditCardInstallment = sourceAccount?.type === "credit_card" && form.type === "expense" && installmentTotal > 1;
         onSubmit({
             ...form,
+            status: isCreditCardInstallment ? "installment" : form.status,
             amount: net,
             amount_gross: !isNaN(gross) && gross !== net ? gross : null,
             to_amount: isCrossCurrencyTransfer ? (!isNaN(destinationAmount) ? destinationAmount : null) : null,
             to_currency: isCrossCurrencyTransfer ? destinationCurrency : null,
-            installment_total: form.installment_total ? parseInt(form.installment_total) : null,
-            installment_current: form.installment_current ? parseInt(form.installment_current) : null,
+            is_recurring: isCreditCardInstallment ? true : form.is_recurring,
+            recurring_frequency: isCreditCardInstallment ? "monthly" : form.recurring_frequency,
+            installment_total: installmentTotal,
+            installment_current: isCreditCardInstallment ? 1 : (form.installment_current ? parseInt(form.installment_current) : null),
+            purchase_date: sourceAccount?.type === "credit_card" && form.type === "expense" ? form.date : (form.purchase_date || null),
+            installment_group_id: isCreditCardInstallment ? (form.installment_group_id || makeGroupId()) : (form.installment_group_id || null),
             probability: form.probability ? parseInt(form.probability) : null,
             // Convert empty strings to null for UUID columns
             category_id: form.category_id || null,
@@ -120,7 +133,8 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
         .filter(a => a.is_visible !== false)
         .sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999));
 
-    const isFreelance = form.project_name || form.client_name;
+    const selectedAccount = accounts.find((a) => a.id === form.account_id);
+    const isCreditCardExpense = selectedAccount?.type === "credit_card" && form.type === "expense";
     const destinationAccount = accounts.find((a) => a.id === form.to_account_id);
     const destinationCurrency = destinationAccount?.currency || form.currency;
     const isCrossCurrencyTransfer = form.type === "transfer" && form.to_account_id && destinationCurrency !== form.currency;
@@ -256,7 +270,31 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
                     )}
 
                     {/* Campos de cuota/recurrente — solo cuando status === installment */}
-                    {form.status === "installment" && (
+                    {isCreditCardExpense && (
+                        <div className="space-y-3 rounded-lg border border-border/60 bg-muted/20 p-3">
+                            <div>
+                                <Label className="text-xs">Cuotas de tarjeta</Label>
+                                <Input type="number" min="1" value={form.installment_total || ""}
+                                    onChange={(e) => {
+                                        const total = parseInt(e.target.value) || 1;
+                                        setForm((p) => ({
+                                            ...p,
+                                            installment_total: e.target.value,
+                                            installment_current: total > 1 ? "1" : "",
+                                            status: total > 1 ? "installment" : "confirmed",
+                                            is_recurring: total > 1,
+                                            recurring_frequency: total > 1 ? "monthly" : "",
+                                        }));
+                                    }}
+                                    placeholder="1" />
+                                <p className="text-xs text-muted-foreground mt-1">
+                                    Si indicas mas de una cuota, se crean movimientos mensuales y cada cuota entra en su resumen.
+                                </p>
+                            </div>
+                        </div>
+                    )}
+
+                    {form.status === "installment" && !isCreditCardExpense && (
                         <div className="space-y-3 rounded-lg border border-border/60 bg-muted/20 p-3">
                             <div>
                                 <Label className="text-xs mb-1.5 block">Frecuencia</Label>
