@@ -7,8 +7,8 @@ import { Button } from "@/components/ui/button";
 import PageHeader from "@/components/shared/PageHeader";
 import { RefreshCw, Save, Loader2, Plus, X, Star, Bitcoin, ChevronUp, ChevronDown, ArrowRight, GripVertical } from "lucide-react";
 import { toast } from "sonner";
-import { getTransferDestinationAmount } from "@/lib/formatters";
 import { useCurrency } from "@/lib/currency-context";
+import { computeAccountBalance } from "@/domain/transactions";
 import { navItems, loadFavPaths, saveFavPaths } from "@/components/layout/Sidebar";
 import { cn } from "@/lib/utils";
 import { Reorder, useDragControls } from "framer-motion";
@@ -70,20 +70,7 @@ export default function Settings() {
         queryFn: () => base44.entities.Transaction.list("-date", 500),
     });
 
-    const today = new Date().toISOString().split("T")[0];
-    function computeEffective(acc) {
-        return transactions
-            .filter((tx) => tx.status !== "projected" && tx.date && tx.date <= today)
-            .reduce((sum, tx) => {
-                if (tx.account_id === acc.id) {
-                    if (tx.type === "income") return sum + (tx.amount || 0);
-                    if (tx.type === "expense") return sum - (tx.amount || 0);
-                    if (tx.type === "transfer") return sum - (tx.amount || 0);
-                }
-                if (tx.to_account_id === acc.id && tx.type === "transfer") return sum + getTransferDestinationAmount(tx, acc.currency);
-                return sum;
-            }, acc.balance || 0);
-    }
+    const computeEffective = (acc) => computeAccountBalance(acc, transactions);
 
     const [rateValues, setRateValues] = useState({});
     const [loadingRates, setLoadingRates] = useState(false);

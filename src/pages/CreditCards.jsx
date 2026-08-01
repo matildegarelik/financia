@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { base44 } from "@/api/base44Client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CreditCard, CalendarDays, CheckCircle2, Plus, WalletCards } from "lucide-react";
+import { CalendarDays, ChevronDown, CreditCard, Pencil, WalletCards } from "lucide-react";
 import PageHeader from "@/components/shared/PageHeader";
 import CurrencySelector from "@/components/shared/CurrencySelector";
 import { Button } from "@/components/ui/button";
@@ -12,53 +12,22 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
+import { TODAY, formatCurrencyCode, formatDate } from "@/lib/formatters";
+import { computeAccountBalance } from "@/domain/transactions";
 import {
-    TODAY,
-    formatCurrencyCode,
-    formatDate,
-    getCreditCardStatementRange,
-    getPreviousCreditCardStatementRange,
-    getTransferDestinationAmount,
+    buildCreditCardStatement,
+    buildStatementsByMonth,
+    getRelevantStatementMonths,
+    getStatementTotal,
+    getStatementMonthKey,
     transactionMatchesStatement,
-} from "@/lib/formatters";
-
-const STATUS_LABELS = {
-    open: "Abierto",
-    closed: "Cerrado",
-    paid: "Pagado",
-};
-
-function computeEffectiveBalance(account, transactions) {
-    return transactions
-        .filter((tx) => tx.status !== "projected" && tx.date && tx.date <= TODAY)
-        .reduce((sum, tx) => {
-            if (tx.account_id === account.id) {
-                if (tx.type === "income") return sum + (tx.amount || 0);
-                if (tx.type === "expense") return sum - (tx.amount || 0);
-                if (tx.type === "transfer") return sum - (tx.amount || 0);
-            }
-            if (tx.to_account_id === account.id && tx.type === "transfer") {
-                return sum + getTransferDestinationAmount(tx, account.currency);
-            }
-            return sum;
-        }, account.balance || 0);
-}
-
-function getStatementTotal(statement, transactions) {
-    return transactions
-        .filter((tx) => tx.status !== "projected" && transactionMatchesStatement(tx, statement))
-        .reduce((sum, tx) => sum + (tx.amount || 0), 0);
-}
-
-function statementKey(statement) {
-    return `${statement.account_id}:${statement.period_start}:${statement.period_end}`;
-}
+} from "@/domain/creditCards";
 
 export default function CreditCards() {
     const queryClient = useQueryClient();
-    const [editingStatement, setEditingStatement] = useState(null);
+    const [editing, setEditing] = useState(null);
+    const [selectedCardId, setSelectedCardId] = useState("");
 
     const { data: accounts = [] } = useQuery({ queryKey: ["accounts"], queryFn: () => base44.entities.Account.list() });
     const { data: transactions = [] } = useQuery({ queryKey: ["transactions"], queryFn: () => base44.entities.Transaction.list("-date", 5000) });
@@ -68,106 +37,57 @@ export default function CreditCards() {
     });
 
     const cardAccounts = useMemo(
-        () => accounts.filter((a) => a.type === "credit_card" && a.is_active !== false),
+        () => accounts.filter((account) => account.type === "credit_card" && account.is_active !== false),
         [accounts]
     );
-    const paymentAccounts = useMemo(
-        () => accounts.filter((a) => a.type !== "credit_card" && a.type !== "investment" && a.is_active !== false),
-        [accounts]
-    );
+    const selectedCard = cardAccounts.find((card) => card.id === selectedCardId) || cardAccounts[0] || null;
 
-    const statementsByKey = useMemo(() => {
-        const map = new Map();
-        statements.forEach((s) => map.set(statementKey(s), s));
-        return map;
-    }, [statements]);
+    useEffect(() => {
+        if (!selectedCardId && cardAccounts[0]?.id) setSelectedCardId(cardAccounts[0].id);
+        else if (selectedCardId && cardAccounts.length > 0 && !cardAccounts.some((card) => card.id === selectedCardId)) {
+            setSelectedCardId(cardAccounts[0].id);
+        }
+    }, [cardAccounts, selectedCardId]);
 
-    const createStatementMut = useMutation({
-        mutationFn: (data) => base44.entities.CreditCardStatement.create(data),
-        onSuccess: () => queryClient.invalidateQueries({ queryKey: ["credit_card_statements"] }),
-    });
+    const saveStatementMut = useMutation({
+        mutationFn: async ({ statement, data }) => {
+            const nextStatement = {
+                ...statement,
+                period_start: data.period_start,
+                period_end: data.close_date,
+                close_date: data.close_date,
+                due_date: data.due_date,
+            };
+            const payload = {
+                account_id: statement.account_id,
+                period_start: data.period_start,
+                period_end: data.close_date,
+                close_date: data.close_date,
+                due_date: data.due_date,
+                total_amount: getStatementTotal(nextStatement, transactions),
+                currency: statement.currency,
+                status: statement.status || "open",
+                payment_account_id: statement.payment_account_id || null,
+                notes: data.notes || null,
+            };
 
-    const updateStatementMut = useMutation({
-        mutationFn: ({ id, data }) => base44.entities.CreditCardStatement.update(id, data),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ["credit_card_statements"] });
-            queryClient.invalidateQueries({ queryKey: ["transactions"] });
-            setEditingStatement(null);
-        },
-    });
+            if (statement.id) {
+                return base44.entities.CreditCardStatement.update(statement.id, payload);
+            }
 
-    const payStatementMut = useMutation({
-        mutationFn: async ({ statement, card, paymentAccount, paymentAmount }) => {
-            const sourceCurrency = paymentAccount.currency || "ARS";
-            const cardCurrency = card.currency || statement.currency || "ARS";
-            const isCrossCurrency = sourceCurrency !== cardCurrency;
-            const amountPaid = isCrossCurrency ? Number(paymentAmount) : Number(statement.total_amount);
-
-            const payment = await base44.entities.Transaction.create({
-                type: "transfer",
-                status: "confirmed",
-                date: TODAY,
-                amount: amountPaid,
-                currency: sourceCurrency,
-                to_amount: isCrossCurrency ? Number(statement.total_amount) : null,
-                to_currency: isCrossCurrency ? cardCurrency : null,
-                description: `Pago resumen ${card.name}`,
-                account_id: paymentAccount.id,
-                account_name: paymentAccount.name,
-                to_account_id: card.id,
-                to_account_name: card.name,
-                is_credit_card_payment: true,
-                credit_card_statement_id: statement.id,
-            });
-            await base44.entities.CreditCardStatement.update(statement.id, {
-                status: "paid",
-                payment_account_id: paymentAccount.id,
-                payment_transaction_id: payment.id,
-            });
-            return payment;
+            return base44.entities.CreditCardStatement.create(payload);
         },
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ["transactions"] });
             queryClient.invalidateQueries({ queryKey: ["credit_card_statements"] });
+            setEditing(null);
         },
     });
-
-    const ensureStatement = (card, range) => {
-        const draft = {
-            ...range,
-            account_id: card.id,
-            currency: card.currency || "ARS",
-        };
-        const existing = statementsByKey.get(statementKey(draft));
-        if (existing) return existing;
-        return {
-            ...draft,
-            total_amount: getStatementTotal(draft, transactions),
-            status: "open",
-            payment_account_id: card.default_payment_account_id || null,
-        };
-    };
-
-    const createStatement = (statement) => {
-        createStatementMut.mutate({
-            account_id: statement.account_id,
-            period_start: statement.period_start,
-            period_end: statement.period_end,
-            close_date: statement.close_date,
-            due_date: statement.due_date,
-            total_amount: statement.total_amount,
-            currency: statement.currency,
-            status: statement.status || "open",
-            payment_account_id: statement.payment_account_id || null,
-            notes: statement.notes || null,
-        });
-    };
 
     return (
         <div className="space-y-5">
             <PageHeader
                 title="Tarjetas"
-                description="Consumos, cierres, vencimientos y pagos de tarjetas de credito"
+                description="Cierres, vencimientos y totales mensuales a pagar"
                 action={<CurrencySelector />}
             />
 
@@ -180,268 +100,249 @@ export default function CreditCards() {
                     </CardContent>
                 </Card>
             ) : (
-                <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                    {cardAccounts.map((card) => {
-                        const effective = computeEffectiveBalance(card, transactions);
-                        const debt = Math.max(0, -effective);
-                        const limit = Number(card.credit_limit) || 0;
-                        const usedPct = limit > 0 ? Math.min((debt / limit) * 100, 100) : 0;
-                        const currentStatement = ensureStatement(card, getCreditCardStatementRange(card));
-                        const previousStatement = ensureStatement(card, getPreviousCreditCardStatementRange(card));
-                        const paymentAccount = paymentAccounts.find((a) => a.id === (previousStatement.payment_account_id || card.default_payment_account_id));
+                <div className="space-y-4">
+                    <div className="flex items-center gap-2 max-w-sm">
+                        <Select value={selectedCard?.id || ""} onValueChange={setSelectedCardId}>
+                            <SelectTrigger>
+                                <SelectValue placeholder="Seleccionar tarjeta" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {cardAccounts.map((card) => (
+                                    <SelectItem key={card.id} value={card.id}>{card.name}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
 
-                        return (
-                            <Card key={card.id}>
-                                <CardHeader className="pb-3">
-                                    <div className="flex items-start justify-between gap-3">
-                                        <div className="flex items-center gap-2 min-w-0">
-                                            <div className="p-2 rounded-lg bg-primary/10 text-primary shrink-0">
-                                                <CreditCard className="h-4 w-4" />
-                                            </div>
-                                            <div className="min-w-0">
-                                                <CardTitle className="text-base truncate">{card.name}</CardTitle>
-                                                <p className="text-xs text-muted-foreground">
-                                                    Cierra dia {card.statement_close_day || 25} · vence dia {card.statement_due_day || "auto"}
-                                                </p>
-                                            </div>
-                                        </div>
-                                        <Badge variant="outline" className="font-mono">{card.currency || "ARS"}</Badge>
-                                    </div>
-                                </CardHeader>
-                                <CardContent className="space-y-4">
-                                    <div className="grid grid-cols-2 gap-3">
-                                        <div>
-                                            <p className="text-xs text-muted-foreground">Deuda actual</p>
-                                            <p className={cn("text-xl font-bold", debt > 0 ? "text-destructive" : "text-primary")}>
-                                                {formatCurrencyCode(debt, card.currency || "ARS")}
-                                            </p>
-                                        </div>
-                                        <div className="text-right">
-                                            <p className="text-xs text-muted-foreground">Disponible</p>
-                                            <p className="text-xl font-bold">
-                                                {limit > 0 ? formatCurrencyCode(Math.max(limit - debt, 0), card.currency || "ARS") : "Sin limite"}
-                                            </p>
-                                        </div>
-                                    </div>
-
-                                    {limit > 0 && (
-                                        <div>
-                                            <div className="flex justify-between text-xs text-muted-foreground mb-1">
-                                                <span>Uso del limite</span>
-                                                <span>{Math.round(usedPct)}%</span>
-                                            </div>
-                                            <Progress value={usedPct} className={usedPct > 85 ? "[&>div]:bg-destructive" : ""} />
-                                        </div>
-                                    )}
-
-                                    <StatementRow
-                                        title="Resumen anterior"
-                                        statement={previousStatement}
-                                        persisted={Boolean(previousStatement.id)}
-                                        paymentAccount={paymentAccount}
-                                        paymentAccounts={paymentAccounts}
-                                        onCreate={createStatement}
-                                        onEdit={setEditingStatement}
-                                        onPay={(statement, account, paymentAmount) => payStatementMut.mutate({ statement, card, paymentAccount: account, paymentAmount })}
-                                        isPaying={payStatementMut.isPending}
-                                    />
-                                    <StatementRow
-                                        title="Resumen actual"
-                                        statement={currentStatement}
-                                        persisted={Boolean(currentStatement.id)}
-                                        paymentAccount={paymentAccounts.find((a) => a.id === (currentStatement.payment_account_id || card.default_payment_account_id))}
-                                        paymentAccounts={paymentAccounts}
-                                        onCreate={createStatement}
-                                        onEdit={setEditingStatement}
-                                        onPay={(statement, account, paymentAmount) => payStatementMut.mutate({ statement, card, paymentAccount: account, paymentAmount })}
-                                        isPaying={payStatementMut.isPending}
-                                    />
-                                </CardContent>
-                            </Card>
-                        );
-                    })}
+                    {selectedCard && (
+                        <CreditCardPanel
+                            card={selectedCard}
+                            transactions={transactions}
+                            statements={statements}
+                            onEdit={(statement) => setEditing({ card: selectedCard, statement })}
+                        />
+                    )}
                 </div>
             )}
 
-            {editingStatement && (
-                <StatementDialog
-                    statement={editingStatement}
-                    paymentAccounts={paymentAccounts}
-                    onClose={() => setEditingStatement(null)}
-                    onSubmit={(data) => updateStatementMut.mutate({ id: editingStatement.id, data })}
+            {editing && (
+                <StatementDatesDialog
+                    card={editing.card}
+                    statement={editing.statement}
+                    saving={saveStatementMut.isPending}
+                    onClose={() => setEditing(null)}
+                    onSubmit={(data) => saveStatementMut.mutate({ statement: editing.statement, data })}
                 />
             )}
         </div>
     );
 }
 
-function StatementRow({ title, statement, persisted, paymentAccount, paymentAccounts, onCreate, onEdit, onPay, isPaying }) {
-    const [selectedPaymentAccountId, setSelectedPaymentAccountId] = useState(paymentAccount?.id || "");
-    const [paymentAmount, setPaymentAmount] = useState("");
-    const selectedPaymentAccount = paymentAccounts.find((a) => a.id === selectedPaymentAccountId) || paymentAccount;
-    const paymentCurrency = selectedPaymentAccount?.currency || "ARS";
-    const statementCurrency = statement.currency || "ARS";
-    const isCrossCurrencyPayment = Boolean(selectedPaymentAccount && paymentCurrency !== statementCurrency);
-    const parsedPaymentAmount = parseFloat(paymentAmount);
-    const canPay = Boolean(
-        selectedPaymentAccount &&
-        !isPaying &&
-        Number(statement.total_amount) > 0 &&
-        (!isCrossCurrencyPayment || parsedPaymentAmount > 0)
+function CreditCardPanel({ card, transactions, statements, onEdit }) {
+    const statementsByMonth = useMemo(
+        () => buildStatementsByMonth(statements, card.id),
+        [statements, card.id]
+    );
+    const months = useMemo(
+        () => getRelevantStatementMonths(card, transactions, { pastMonths: 1, futureMonths: 3, today: TODAY }),
+        [card, transactions]
+    );
+    const monthlyStatements = useMemo(
+        () => months
+            .map((monthKey) => buildCreditCardStatement(card, monthKey, transactions, statementsByMonth))
+            .filter((statement) => statement.total_amount > 0 || statement.id || statement.due_date >= TODAY),
+        [card, months, statementsByMonth, transactions]
     );
 
-    useEffect(() => {
-        setSelectedPaymentAccountId(paymentAccount?.id || "");
-    }, [paymentAccount?.id]);
-
-    useEffect(() => {
-        setPaymentAmount(isCrossCurrencyPayment ? "" : String(statement.total_amount || ""));
-    }, [isCrossCurrencyPayment, statement.total_amount, selectedPaymentAccount?.id]);
+    const nextDueStatement = useMemo(
+        () => monthlyStatements
+            .filter((statement) => statement.due_date >= TODAY && statement.close_date < TODAY)
+            .sort((a, b) => a.due_date.localeCompare(b.due_date))[0]
+            || monthlyStatements
+                .filter((statement) => statement.due_date >= TODAY && statement.total_amount > 0)
+                .sort((a, b) => a.due_date.localeCompare(b.due_date))[0],
+        [monthlyStatements]
+    );
+    const nextCloseStatement = useMemo(
+        () => monthlyStatements
+            .filter((statement) => statement.close_date >= TODAY)
+            .sort((a, b) => a.close_date.localeCompare(b.close_date))[0],
+        [monthlyStatements]
+    );
+    const visibleStatements = [nextDueStatement, nextCloseStatement]
+        .filter(Boolean)
+        .filter((statement, index, all) => all.findIndex((item) => getStatementMonthKey(item) === getStatementMonthKey(statement)) === index);
+    const effective = computeAccountBalance(card, transactions);
+    const debt = Math.max(0, -effective);
 
     return (
-        <div className="rounded-lg border border-border/60 p-3 space-y-3">
-            <div className="flex items-start justify-between gap-3">
-                <div>
-                    <p className="text-sm font-semibold">{title}</p>
-                    <p className="text-xs text-muted-foreground">
-                        {formatDate(statement.period_start)} - {formatDate(statement.period_end)}
-                    </p>
-                </div>
-                <Badge variant={statement.status === "paid" ? "default" : "secondary"}>{STATUS_LABELS[statement.status] || "Abierto"}</Badge>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 text-sm">
-                <div>
-                    <p className="text-xs text-muted-foreground">Total</p>
-                    <p className="font-bold">{formatCurrencyCode(statement.total_amount, statement.currency || "ARS")}</p>
-                </div>
-                <div>
-                    <p className="text-xs text-muted-foreground">Vence</p>
-                    <p className={cn("font-medium", statement.status !== "paid" && statement.due_date < TODAY && "text-destructive")}>
-                        {formatDate(statement.due_date)}
-                    </p>
-                </div>
-            </div>
-
-            {!persisted ? (
-                <Button variant="outline" size="sm" className="w-full" onClick={() => onCreate(statement)}>
-                    <Plus className="h-4 w-4 mr-1.5" />Crear resumen editable
-                </Button>
-            ) : (
-                <div className="space-y-2">
-                    {statement.status !== "paid" && (
-                        <div className="space-y-2">
-                            <div className="grid grid-cols-[1fr_auto] gap-2">
-                                <Select value={selectedPaymentAccountId || paymentAccount?.id || ""} onValueChange={setSelectedPaymentAccountId}>
-                                    <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Cuenta de pago" /></SelectTrigger>
-                                    <SelectContent>
-                                        {paymentAccounts.map((a) => (
-                                            <SelectItem key={a.id} value={a.id}>{a.name} ({a.currency || "ARS"})</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                                <Button size="sm" disabled={!canPay} onClick={() => onPay(statement, selectedPaymentAccount, isCrossCurrencyPayment ? parsedPaymentAmount : statement.total_amount)}>
-                                    <CheckCircle2 className="h-4 w-4 mr-1" />Pagar
-                                </Button>
-                            </div>
-                            {isCrossCurrencyPayment && (
-                                <div className="grid grid-cols-[1fr_72px] gap-2 items-end">
-                                    <div>
-                                        <Label className="text-xs">Monto debitado</Label>
-                                        <Input
-                                            className="h-8 text-xs"
-                                            type="number"
-                                            step="0.01"
-                                            min="0"
-                                            placeholder="0.00"
-                                            value={paymentAmount}
-                                            onChange={(e) => setPaymentAmount(e.target.value)}
-                                        />
-                                    </div>
-                                    <div className="h-8 flex items-center justify-center rounded-md border border-input bg-muted/40 px-2 text-xs font-mono font-semibold text-muted-foreground">
-                                        {paymentCurrency}
-                                    </div>
-                                    <p className="col-span-2 text-xs text-muted-foreground">
-                                        La tarjeta recibe {formatCurrencyCode(statement.total_amount, statementCurrency)}.
-                                    </p>
-                                </div>
-                            )}
+        <Card>
+            <CardHeader className="pb-3">
+                <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-2 min-w-0">
+                        <div className="p-2 rounded-lg bg-primary/10 text-primary shrink-0">
+                            <CreditCard className="h-4 w-4" />
                         </div>
-                    )}
-                    <Button variant="ghost" size="sm" className="w-full" onClick={() => onEdit(statement)}>
-                        <CalendarDays className="h-4 w-4 mr-1.5" />Editar resumen
+                        <div className="min-w-0">
+                            <CardTitle className="text-base truncate">{card.name}</CardTitle>
+                            <p className="text-xs text-muted-foreground">
+                                Cierre por defecto: penultimo jueves. Vence: primer lunes del mes siguiente.
+                            </p>
+                        </div>
+                    </div>
+                    <Badge variant="outline" className="font-mono">{card.currency || "ARS"}</Badge>
+                </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                    <div>
+                        <p className="text-xs text-muted-foreground">Deuda actual</p>
+                        <p className={cn("text-xl font-bold", debt > 0 ? "text-destructive" : "text-primary")}>
+                            {formatCurrencyCode(debt, card.currency || "ARS")}
+                        </p>
+                    </div>
+                    <div className="text-right">
+                        <p className="text-xs text-muted-foreground">Tarjeta</p>
+                        <p className="text-xl font-bold">
+                            {card.name}
+                        </p>
+                    </div>
+                </div>
+
+                <div className="space-y-2">
+                    {visibleStatements.length === 0 ? (
+                        <div className="rounded-lg border border-border/60 p-4 text-center text-sm text-muted-foreground">
+                            No hay consumos ni vencimientos proximos.
+                        </div>
+                    ) : visibleStatements.map((statement) => (
+                        <StatementMonthRow
+                            key={`${statement.account_id}:${getStatementMonthKey(statement)}`}
+                            label={statement === nextDueStatement ? "Proximo a vencer" : "Proximo a cerrar"}
+                            statement={statement}
+                            transactions={transactions}
+                            onEdit={() => onEdit(statement)}
+                        />
+                    ))}
+                </div>
+            </CardContent>
+        </Card>
+    );
+}
+
+function StatementMonthRow({ label, statement, transactions, onEdit }) {
+    const [expanded, setExpanded] = useState(false);
+    const monthKey = getStatementMonthKey(statement);
+    const statementTransactions = useMemo(
+        () => transactions
+            .filter((tx) => transactionMatchesStatement(tx, statement))
+            .sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.created_at || "").localeCompare(b.created_at || "")),
+        [transactions, statement]
+    );
+    const isPastDue = statement.total_amount > 0 && statement.due_date < TODAY;
+    const hasCustomDates = Boolean(statement.id);
+
+    return (
+        <div className={cn("rounded-lg border p-3 space-y-3", isPastDue ? "border-destructive/40 bg-destructive/5" : "border-border/60")}>
+            <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="text-xs">{label}</Badge>
+                        <p className="text-sm font-semibold">{monthKey}</p>
+                        {hasCustomDates && <Badge variant="secondary" className="text-xs">fechas guardadas</Badge>}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                        Cierra {formatDate(statement.close_date)} · vence {formatDate(statement.due_date)}
+                    </p>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setExpanded((value) => !value)}>
+                        <ChevronDown className={cn("h-4 w-4 transition-transform", expanded && "rotate-180")} />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onEdit}>
+                        <Pencil className="h-4 w-4" />
                     </Button>
                 </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-3 rounded-md bg-muted/30 px-3 py-2">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <CalendarDays className="h-3.5 w-3.5" />
+                    <span>Total a pagar al vencimiento</span>
+                </div>
+                <p className={cn("text-sm font-bold", statement.total_amount > 0 ? "text-destructive" : "text-muted-foreground")}>
+                    {formatCurrencyCode(statement.total_amount, statement.currency || "ARS")}
+                </p>
+            </div>
+
+            {expanded && statementTransactions.length > 0 && (
+                <div className="space-y-1.5">
+                    {statementTransactions.map((tx) => (
+                        <div key={tx.id} className="grid grid-cols-[1fr_auto] gap-3 text-xs">
+                            <div className="min-w-0 text-muted-foreground">
+                                <span>{formatDate(tx.date)}</span>
+                                <span> · </span>
+                                <span className="text-foreground">{tx.description || "Consumo"}</span>
+                                {tx.installment_current && tx.installment_total && (
+                                    <span> · cuota {tx.installment_current}/{tx.installment_total}</span>
+                                )}
+                            </div>
+                            <span className="font-medium">{formatCurrencyCode(tx.amount, tx.currency || statement.currency || "ARS")}</span>
+                        </div>
+                    ))}
+                </div>
+            )}
+            {expanded && statementTransactions.length === 0 && (
+                <p className="text-xs text-muted-foreground">No hay consumos dentro de este periodo.</p>
             )}
         </div>
     );
 }
 
-function StatementDialog({ statement, paymentAccounts, onClose, onSubmit }) {
+function StatementDatesDialog({ card, statement, saving, onClose, onSubmit }) {
     const [form, setForm] = useState({
-        total_amount: String(statement.total_amount || 0),
+        period_start: statement.period_start || "",
+        close_date: statement.close_date || "",
         due_date: statement.due_date || "",
-        status: statement.status || "open",
-        payment_account_id: statement.payment_account_id || "",
         notes: statement.notes || "",
     });
-    const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+    const set = (key, value) => setForm((current) => ({ ...current, [key]: value }));
 
     return (
         <Dialog open onOpenChange={onClose}>
             <DialogContent className="max-w-sm">
-                <DialogHeader><DialogTitle>Editar resumen</DialogTitle></DialogHeader>
+                <DialogHeader>
+                    <DialogTitle>Fechas de {card.name}</DialogTitle>
+                </DialogHeader>
                 <form
                     className="space-y-4"
-                    onSubmit={(e) => {
-                        e.preventDefault();
-                        onSubmit({
-                            total_amount: parseFloat(form.total_amount) || 0,
-                            due_date: form.due_date,
-                            status: form.status,
-                            payment_account_id: form.payment_account_id || null,
-                            notes: form.notes || null,
-                        });
+                    onSubmit={(event) => {
+                        event.preventDefault();
+                        onSubmit(form);
                     }}
                 >
                     <div>
-                        <Label>Total</Label>
-                        <Input type="number" step="0.01" value={form.total_amount} onChange={(e) => set("total_amount", e.target.value)} />
+                        <Label>Inicio del periodo</Label>
+                        <Input type="date" value={form.period_start} onChange={(event) => set("period_start", event.target.value)} required />
+                    </div>
+                    <div>
+                        <Label>Cierre</Label>
+                        <Input type="date" value={form.close_date} onChange={(event) => set("close_date", event.target.value)} required />
                     </div>
                     <div>
                         <Label>Vencimiento</Label>
-                        <Input type="date" value={form.due_date} onChange={(e) => set("due_date", e.target.value)} />
-                    </div>
-                    <div>
-                        <Label>Estado</Label>
-                        <Select value={form.status} onValueChange={(v) => set("status", v)}>
-                            <SelectTrigger><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="open">Abierto</SelectItem>
-                                <SelectItem value="closed">Cerrado</SelectItem>
-                                <SelectItem value="paid">Pagado</SelectItem>
-                            </SelectContent>
-                        </Select>
-                    </div>
-                    <div>
-                        <Label>Cuenta de pago</Label>
-                        <Select value={form.payment_account_id || "none"} onValueChange={(v) => set("payment_account_id", v === "none" ? "" : v)}>
-                            <SelectTrigger><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="none">Sin cuenta</SelectItem>
-                                {paymentAccounts.map((a) => (
-                                    <SelectItem key={a.id} value={a.id}>{a.name} ({a.currency || "ARS"})</SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
+                        <Input type="date" value={form.due_date} onChange={(event) => set("due_date", event.target.value)} required />
                     </div>
                     <div>
                         <Label>Notas</Label>
-                        <Textarea value={form.notes} onChange={(e) => set("notes", e.target.value)} rows={2} />
+                        <Textarea value={form.notes} onChange={(event) => set("notes", event.target.value)} rows={2} />
+                    </div>
+                    <div className="rounded-md bg-muted/30 px-3 py-2 text-sm flex justify-between gap-3">
+                        <span className="text-muted-foreground">Total calculado</span>
+                        <span className="font-semibold">{formatCurrencyCode(statement.total_amount, statement.currency || "ARS")}</span>
                     </div>
                     <div className="flex gap-2">
                         <Button type="button" variant="outline" className="flex-1" onClick={onClose}>Cancelar</Button>
-                        <Button type="submit" className="flex-1">Guardar</Button>
+                        <Button type="submit" className="flex-1" disabled={saving}>Guardar</Button>
                     </div>
                 </form>
             </DialogContent>

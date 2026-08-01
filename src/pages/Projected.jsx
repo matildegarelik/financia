@@ -9,7 +9,8 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import PageHeader from "@/components/shared/PageHeader";
 import CurrencySelector from "@/components/shared/CurrencySelector";
 import TransactionFormProjected from "@/components/transactions/TransactionFormProjected";
-import { formatCurrencyCode, formatDate, getCurrentMonth, getMonthLabel, isRegularExpense, getTransferDestinationAmount } from "@/lib/formatters";
+import { formatCurrencyCode, formatDate, getCurrentMonth, getMonthLabel, isRegularExpense } from "@/lib/formatters";
+import { computeAccountBalance } from "@/domain/transactions";
 import { cn } from "@/lib/utils";
 import { useCurrency } from "@/lib/currency-context";
 import { toast } from "sonner";
@@ -90,21 +91,10 @@ export default function Projected() {
     const [budgetExpanded, setBudgetExpanded] = useState(false);
 
     // Balance total actual (cuentas líquidas + inversiones activas)
-    const todayDate = new Date().toISOString().split("T")[0];
     const currentLiquidBalance = useMemo(() => {
         const liquidAccts = accounts.filter((a) => a.type !== "investment");
         return liquidAccts.reduce((sum, acc) => {
-            const eff = transactions
-                .filter((tx) => tx.status !== "projected" && tx.date && tx.date <= todayDate)
-                .reduce((s, tx) => {
-                    if (tx.account_id === acc.id) {
-                        if (tx.type === "income") return s + (tx.amount || 0);
-                        if (tx.type === "expense") return s - (tx.amount || 0);
-                        if (tx.type === "transfer") return s - (tx.amount || 0);
-                    }
-                    if (tx.to_account_id === acc.id && tx.type === "transfer") return s + getTransferDestinationAmount(tx, acc.currency);
-                    return s;
-                }, acc.balance || 0);
+            const eff = computeAccountBalance(acc, transactions);
             return sum + convert(eff, acc.currency || "ARS");
         }, 0);
     }, [accounts, transactions, convert]);

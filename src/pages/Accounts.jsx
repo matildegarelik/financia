@@ -13,7 +13,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Badge } from "@/components/ui/badge";
 import PageHeader from "@/components/shared/PageHeader";
 import CurrencySelector from "@/components/shared/CurrencySelector";
-import { formatCurrency, formatCurrencyCode, ACCOUNT_TYPES, getTransferDestinationAmount } from "@/lib/formatters";
+import { formatCurrency, formatCurrencyCode, ACCOUNT_TYPES } from "@/lib/formatters";
+import { computeAccountBalance } from "@/domain/transactions";
 import { useCurrency } from "@/lib/currency-context";
 import { cn } from "@/lib/utils";
 
@@ -41,24 +42,7 @@ export default function Accounts() {
         queryFn: () => base44.entities.Transaction.list("-date", 5000),
     });
 
-    const today = new Date().toISOString().split("T")[0];
-
-    function computeEffectiveBalance(acc) {
-        const initial = acc.balance || 0;
-        return transactions
-            .filter((tx) => tx.status !== "projected" && tx.date && tx.date <= today)
-            .reduce((sum, tx) => {
-                if (tx.account_id === acc.id) {
-                    if (tx.type === "income") return sum + (tx.amount || 0);
-                    if (tx.type === "expense") return sum - (tx.amount || 0);
-                    if (tx.type === "transfer") return sum - (tx.amount || 0);
-                }
-                if (tx.to_account_id === acc.id && tx.type === "transfer") {
-                    return sum + getTransferDestinationAmount(tx, acc.currency);
-                }
-                return sum;
-            }, initial);
-    }
+    const computeEffectiveBalance = (acc) => computeAccountBalance(acc, transactions);
 
     const createMut = useMutation({
         mutationFn: (d) => base44.entities.Account.create(d),
@@ -463,18 +447,9 @@ function AccountFormDialog({ open, onClose, onSubmit, initial, accounts = [] }) 
                     </div>
                     {form.type === "credit_card" && (
                         <div className="space-y-3 rounded-lg border border-border/60 bg-muted/20 p-3">
-                            <div className="grid grid-cols-2 gap-2">
-                                <div>
-                                    <Label className="text-xs">Dia de cierre</Label>
-                                    <Input type="number" min="1" max="31" value={form.statement_close_day}
-                                        onChange={(e) => set("statement_close_day", e.target.value)} placeholder="25" />
-                                </div>
-                                <div>
-                                    <Label className="text-xs">Dia de vencimiento</Label>
-                                    <Input type="number" min="1" max="31" value={form.statement_due_day}
-                                        onChange={(e) => set("statement_due_day", e.target.value)} placeholder="10" />
-                                </div>
-                            </div>
+                            <p className="text-xs text-muted-foreground">
+                                Las fechas de cierre y vencimiento se ajustan por mes desde Tarjetas. Si no guardas fechas, se usa penultimo jueves y primer lunes del mes siguiente.
+                            </p>
                             <div>
                                 <Label className="text-xs">Cuenta de pago</Label>
                                 <Select value={form.default_payment_account_id || "none"} onValueChange={(v) => set("default_payment_account_id", v === "none" ? "" : v)}>

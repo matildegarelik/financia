@@ -14,6 +14,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import PageHeader from "@/components/shared/PageHeader";
 import TransactionForm from "@/components/transactions/TransactionForm";
 import { formatCurrency, formatCurrencyCode, formatDate, TRANSACTION_STATUS, TODAY, getTransferDestinationAmount } from "@/lib/formatters";
+import { computeAccountBalance, getRelatedInstallments } from "@/domain/transactions";
 import { useCurrency } from "@/lib/currency-context";
 import { ArrowDownLeft, ArrowUpRight, ArrowLeftRight } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -213,22 +214,8 @@ export default function Transactions() {
         return { income, expense, net: income - expense };
     }, [subtotalRows, convert, displayCurrency]);
 
-    function computeEffective(acc) {
-        return allTx
-            .filter((tx) => tx.status !== "projected" && tx.date && tx.date <= TODAY)
-            .reduce((sum, tx) => {
-                if (tx.account_id === acc.id) {
-                    if (tx.type === "income") return sum + (tx.amount || 0);
-                    if (tx.type === "expense") return sum - (tx.amount || 0);
-                    if (tx.type === "transfer") return sum - (tx.amount || 0);
-                }
-                if (tx.to_account_id === acc.id && tx.type === "transfer") return sum + getTransferDestinationAmount(tx, acc.currency);
-                return sum;
-            }, acc.balance || 0);
-    }
-
     const selectedAccount = accountTab !== "all" ? accounts.find(a => a.id === accountTab) : null;
-    const selectedBalance = selectedAccount ? computeEffective(selectedAccount) : null;
+    const selectedBalance = selectedAccount ? computeAccountBalance(selectedAccount, allTx) : null;
 
     function buildFutureOccurrences(data) {
         if (!data.is_recurring || !data.recurring_frequency) return [];
@@ -251,11 +238,6 @@ export default function Transactions() {
         }
         return occurrences;
     }
-
-    const getRelatedInstallments = (tx) =>
-        allTx.filter(t => t.id !== tx.id && t.is_recurring && t.type === tx.type &&
-            t.recurring_frequency === tx.recurring_frequency &&
-            t.description === tx.description && t.account_id === tx.account_id);
 
     const createMut = useMutation({
         mutationFn: async (data) => {
@@ -618,7 +600,7 @@ export default function Transactions() {
             </AlertDialog>
 
             {deleteConfirm && (() => {
-                const related = getRelatedInstallments(deleteConfirm);
+                const related = getRelatedInstallments(deleteConfirm, allTx);
                 const total = related.length + 1;
                 return (
                     <Dialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>

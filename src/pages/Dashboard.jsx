@@ -13,6 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import CurrencySelector from "@/components/shared/CurrencySelector";
 import SpendingChart from "@/components/dashboard/SpendingChart";
 import { formatCurrencyCode, formatDate, getCurrentMonth, TODAY, isRegularExpense, getTransferDestinationAmount } from "@/lib/formatters";
+import { computeAccountBalance } from "@/domain/transactions";
 import { useCurrency } from "@/lib/currency-context";
 import { cn } from "@/lib/utils";
 import { format as fnsFormat, startOfMonth, endOfMonth } from "date-fns";
@@ -72,19 +73,7 @@ export default function Dashboard() {
 
     const netMonth = monthlyIncome - monthlyExpense;
 
-    function computeEffective(acc) {
-        return transactions
-            .filter((tx) => tx.status !== "projected" && tx.date && tx.date <= TODAY)
-            .reduce((sum, tx) => {
-                if (tx.account_id === acc.id) {
-                    if (tx.type === "income") return sum + (tx.amount || 0);
-                    if (tx.type === "expense") return sum - (tx.amount || 0);
-                    if (tx.type === "transfer") return sum - (tx.amount || 0);
-                }
-                if (tx.to_account_id === acc.id && tx.type === "transfer") return sum + getTransferDestinationAmount(tx, acc.currency);
-                return sum;
-            }, acc.balance || 0);
-    }
+    const computeEffective = (acc) => computeAccountBalance(acc, transactions);
 
     const liquidAccounts = accounts.filter((a) => a.type !== "investment");
     const liquidBalance = useMemo(() =>

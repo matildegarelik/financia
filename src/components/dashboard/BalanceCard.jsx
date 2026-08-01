@@ -2,7 +2,8 @@ import React from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useCurrency } from "@/lib/currency-context";
-import { formatCurrency, TODAY, getTransferDestinationAmount } from "@/lib/formatters";
+import { formatCurrency, TODAY } from "@/lib/formatters";
+import { computeAccountBalance } from "@/domain/transactions";
 import { Wallet, TrendingUp, Lock } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -14,19 +15,7 @@ export default function BalanceCard({ accounts, transactions, investments, horiz
     // Base account balances (liquid) — compute effective = initial + past transactions
     const liquidAccounts = accounts.filter((a) => a.type !== "investment" && a.is_active !== false);
 
-    function computeEffective(acc) {
-        return transactions
-            .filter((tx) => tx.status !== "projected" && tx.date && tx.date <= TODAY)
-            .reduce((sum, tx) => {
-                if (tx.account_id === acc.id) {
-                    if (tx.type === "income") return sum + (tx.amount || 0);
-                    if (tx.type === "expense") return sum - (tx.amount || 0);
-                    if (tx.type === "transfer") return sum - (tx.amount || 0);
-                }
-                if (tx.to_account_id === acc.id && tx.type === "transfer") return sum + getTransferDestinationAmount(tx, acc.currency);
-                return sum;
-            }, acc.balance || 0);
-    }
+    const computeEffective = (acc) => computeAccountBalance(acc, transactions);
 
     let liquidBalance = liquidAccounts.reduce(
         (s, a) => s + convert(computeEffective(a), a.currency || "ARS"), 0

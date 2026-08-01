@@ -81,6 +81,7 @@ export default function Categories() {
         if (!byParent[c.parent_category]) byParent[c.parent_category] = [];
         byParent[c.parent_category].push(c);
     });
+    Object.values(byParent).forEach((items) => items.sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999) || a.name.localeCompare(b.name)));
     const visibleParentIds = new Set(parents.map((p) => p.id));
     // Children whose parent is in another tab → show as standalone
     const orphans = childrenAll.filter((c) => !visibleParentIds.has(c.parent_category));
@@ -145,7 +146,7 @@ export default function Categories() {
                                 parent={parent}
                                 idx={idx}
                                 total={localParents.length}
-                                subcategories={byParent[parent.id] || []}
+                                byParent={byParent}
                                 isExpanded={isExpanded(parent.id)}
                                 onToggle={() => toggle(parent.id)}
                                 typeBadge={typeBadge}
@@ -182,8 +183,9 @@ export default function Categories() {
     );
 }
 
-function SortableCategoryCard({ parent, idx, total, subcategories, isExpanded, onToggle, typeBadge, ActionBtns, onMoveUp, onMoveDown }) {
+function SortableCategoryCard({ parent, idx, total, byParent, isExpanded, onToggle, typeBadge, ActionBtns, onMoveUp, onMoveDown }) {
     const dragControls = useDragControls();
+    const subcategories = byParent[parent.id] || [];
 
     return (
         <Reorder.Item value={parent} as="div" dragControls={dragControls} dragListener={false}>
@@ -216,17 +218,79 @@ function SortableCategoryCard({ parent, idx, total, subcategories, isExpanded, o
                 {isExpanded && subcategories.length > 0 && (
                     <div className="border-t divide-y">
                         {subcategories.map((child) => (
-                            <div key={child.id} className="group flex items-center gap-2 px-3 py-2 bg-muted/20 hover:bg-muted/40 transition-colors">
-                                <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
-                                <span className="text-sm text-muted-foreground flex-1 truncate">{child.name}</span>
-                                <ActionBtns cat={child} />
-                            </div>
+                            <CategoryChildRow
+                                key={child.id}
+                                category={child}
+                                depth={1}
+                                byParent={byParent}
+                                ActionBtns={ActionBtns}
+                            />
                         ))}
                     </div>
                 )}
             </Card>
         </Reorder.Item>
     );
+}
+
+function CategoryChildRow({ category, depth, byParent, ActionBtns }) {
+    const children = byParent[category.id] || [];
+    return (
+        <>
+            <div
+                className="group flex items-center gap-2 py-2 bg-muted/20 hover:bg-muted/40 transition-colors"
+                style={{ paddingLeft: `${12 + depth * 14}px`, paddingRight: 12 }}
+            >
+                <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
+                <span className="text-sm text-muted-foreground flex-1 truncate">{category.name}</span>
+                <ActionBtns cat={category} />
+            </div>
+            {children.map((child) => (
+                <CategoryChildRow
+                    key={child.id}
+                    category={child}
+                    depth={depth + 1}
+                    byParent={byParent}
+                    ActionBtns={ActionBtns}
+                />
+            ))}
+        </>
+    );
+}
+
+function getDescendantIds(categoryId, categories) {
+    const childrenByParent = {};
+    categories.forEach((category) => {
+        if (!category.parent_category) return;
+        if (!childrenByParent[category.parent_category]) childrenByParent[category.parent_category] = [];
+        childrenByParent[category.parent_category].push(category);
+    });
+
+    const descendants = new Set();
+    const visit = (id) => {
+        (childrenByParent[id] || []).forEach((child) => {
+            if (descendants.has(child.id)) return;
+            descendants.add(child.id);
+            visit(child.id);
+        });
+    };
+    visit(categoryId);
+    return descendants;
+}
+
+function getCategoryPath(category, categories) {
+    const byId = new Map(categories.map((item) => [item.id, item]));
+    const parts = [category.name];
+    let parent = byId.get(category.parent_category);
+    const visited = new Set([category.id]);
+
+    while (parent && !visited.has(parent.id)) {
+        visited.add(parent.id);
+        parts.unshift(parent.name);
+        parent = byId.get(parent.parent_category);
+    }
+
+    return parts.join(" / ");
 }
 
 function CategoryFormDialog({ open, onClose, onSubmit, initial, categories }) {
@@ -237,9 +301,14 @@ function CategoryFormDialog({ open, onClose, onSubmit, initial, categories }) {
     }, [initial, open]);
     const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
-    const parentOptions = categories.filter(
-        (c) => c.type === form.type && !c.parent_category && c.id !== initial?.id
-    );
+    const descendantIds = initial ? getDescendantIds(initial.id, categories) : new Set();
+    const parentOptions = categories
+        .filter((c) =>
+            c.type === form.type &&
+            c.id !== initial?.id &&
+            !descendantIds.has(c.id)
+        )
+        .sort((a, b) => getCategoryPath(a, categories).localeCompare(getCategoryPath(b, categories)));
 
     return (
         <Dialog open={open} onOpenChange={onClose}>
@@ -262,7 +331,7 @@ function CategoryFormDialog({ open, onClose, onSubmit, initial, categories }) {
                             <SelectTrigger><SelectValue placeholder="Sin padre (raíz)" /></SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="none">Sin padre (raíz)</SelectItem>
-                                {parentOptions.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                                {parentOptions.map((c) => <SelectItem key={c.id} value={c.id}>{getCategoryPath(c, categories)}</SelectItem>)}
                             </SelectContent>
                         </Select>
                     </div>
