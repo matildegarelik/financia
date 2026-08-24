@@ -28,7 +28,7 @@ const createEntityClient = (tableName) => ({
         return { data: data || [], count: count ?? 0 };
     },
     listForSubtotal: async (applyFilters) => {
-        let q = supabase.from(tableName).select('type,amount,currency');
+        let q = supabase.from(tableName).select('type,amount,currency,reporting_mode,is_investment_transfer,is_credit_card_payment');
         if (applyFilters) q = applyFilters(q);
         const { data, error } = await q;
         if (error) throw error;

@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import PageHeader from "@/components/shared/PageHeader";
-import { formatCurrencyCode, isRegularExpense } from "@/lib/formatters";
+import { formatCurrencyCode, isRegularExpense, isRegularIncome } from "@/lib/formatters";
 import { useCurrency } from "@/lib/currency-context";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
@@ -59,7 +59,7 @@ export default function Budgets() {
         const matchIds = getMatchingCategoryIds(budget);
         return transactions
             .filter((tx) => {
-                if (isIncome ? tx.type !== "income" : !isRegularExpense(tx)) return false;
+                if (isIncome ? !isRegularIncome(tx) : !isRegularExpense(tx)) return false;
                 if (!tx.date) return false;
                 if (tx.date < monthStart || tx.date > monthEnd) return false;
                 if (tx.status === "projected") return false;

@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import PageHeader from "@/components/shared/PageHeader";
 import CurrencySelector from "@/components/shared/CurrencySelector";
 import { useCurrency } from "@/lib/currency-context";
-import { formatCurrency, getMonthLabel, TODAY, isRegularExpense } from "@/lib/formatters";
+import { formatCurrency, getMonthLabel, TODAY, isRegularExpense, isRegularIncome, getTransferDifference, affectsReports } from "@/lib/formatters";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
@@ -136,8 +136,8 @@ export default function Analytics() {
             if (t.status !== "confirmed" && t.status !== "installment") return false;
             if (dateFrom && t.date < dateFrom) return false;
             if (dateTo && t.date > dateTo) return false;
-            if (categoryMode === "income") return t.type === "income";
-            if (categoryMode === "expense") return isRegularExpense(t);
+            if (categoryMode === "income") return isRegularIncome(t) || (t.type === "transfer" && affectsReports(t) && getTransferDifference(t, convert) > 0);
+            if (categoryMode === "expense") return isRegularExpense(t) || (t.type === "transfer" && affectsReports(t) && getTransferDifference(t, convert) < 0);
             if (categoryMode === "custom") {
                 if (selectedCategoryIds.length === 0) return true;
                 return selectedCategoryFilter.ids.has(t.category_id) || selectedCategoryFilter.names.has(t.category_name);
@@ -170,8 +170,13 @@ export default function Analytics() {
             if (!key) return;
             if (!byPeriod[key]) byPeriod[key] = { income: 0, expense: 0 };
             const amt = convert(t.amount || 0, t.currency || "ARS");
-            if (t.type === "income") byPeriod[key].income += amt;
+            if (isRegularIncome(t)) byPeriod[key].income += amt;
             else if (isRegularExpense(t)) byPeriod[key].expense += amt;
+            else if (t.type === "transfer" && affectsReports(t)) {
+                const diff = getTransferDifference(t, convert);
+                if (diff > 0) byPeriod[key].income += diff;
+                if (diff < 0) byPeriod[key].expense += Math.abs(diff);
+            }
         });
 
         const sortedKeys = Object.keys(byPeriod).sort();
@@ -206,6 +211,12 @@ export default function Analytics() {
             const k = t.category_name || "Sin categoría";
             map[k] = (map[k] || 0) + convert(t.amount || 0, t.currency || "ARS");
         });
+        filteredTransactions
+            .filter((t) => t.type === "transfer" && affectsReports(t))
+            .forEach((t) => {
+                const diff = getTransferDifference(t, convert);
+                if (diff < 0) map["Diferencia de transferencia"] = (map["Diferencia de transferencia"] || 0) + Math.abs(diff);
+            });
         return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 8);
     }, [filteredTransactions, displayCurrency, convert]);
 
@@ -233,6 +244,15 @@ export default function Analytics() {
             const key = (t.description || "Sin descripcion").trim();
             map[key] = (map[key] || 0) + convert(t.amount || 0, t.currency || "ARS");
         });
+        filteredTransactions
+            .filter((t) => t.type === "transfer" && affectsReports(t))
+            .forEach((t) => {
+                const diff = getTransferDifference(t, convert);
+                if (diff < 0) {
+                    const key = t.description ? `Dif. transferencia: ${t.description}` : "Diferencia de transferencia";
+                    map[key] = (map[key] || 0) + Math.abs(diff);
+                }
+            });
         return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 6);
     }, [filteredTransactions, convert, displayCurrency]);
 

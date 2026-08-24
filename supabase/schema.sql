@@ -68,6 +68,7 @@ create table transactions (
     purchase_date text,
     installment_group_id text,
     is_credit_card_payment boolean default false,
+    reporting_mode text not null default 'normal' check (reporting_mode in ('normal', 'neutral', 'investment', 'credit_card_payment', 'exchange_difference')),
     created_at timestamptz default now()
 );
 

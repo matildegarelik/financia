@@ -100,7 +100,19 @@ export const TRANSACTION_STATUS = {
 
 export const TODAY = new Date().toISOString().split("T")[0];
 
-export const isRegularExpense = (tx) => tx.type === "expense" && !tx.is_investment_transfer && !tx.is_credit_card_payment;
+export function getReportingMode(tx) {
+    if (!tx) return "normal";
+    if (tx.reporting_mode) return tx.reporting_mode;
+    if (tx.is_investment_transfer) return "investment";
+    if (tx.is_credit_card_payment) return "credit_card_payment";
+    return "normal";
+}
+
+export const affectsReports = (tx) => getReportingMode(tx) === "normal" || getReportingMode(tx) === "exchange_difference";
+
+export const isRegularIncome = (tx) => tx.type === "income" && affectsReports(tx);
+
+export const isRegularExpense = (tx) => tx.type === "expense" && affectsReports(tx);
 
 export const isCreditCardAccount = (account) => account?.type === "credit_card";
 
@@ -176,4 +188,42 @@ export function getTransferDestinationAmount(tx, destinationCurrency) {
     const sourceCurrency = tx.currency || destinationCurrency;
     const targetCurrency = tx.to_currency || destinationCurrency || sourceCurrency;
     return sourceCurrency === targetCurrency ? (Number(tx.amount) || 0) : 0;
+}
+
+export function getTransferDifference(tx, convert = (amount) => amount) {
+    if (!tx || tx.type !== "transfer") return 0;
+
+    const sourceCurrency = tx.currency || "ARS";
+    const destinationCurrency = tx.to_currency || sourceCurrency;
+    const destinationAmount = getTransferDestinationAmount(tx, destinationCurrency);
+
+    const sourceValue = convert(Number(tx.amount) || 0, sourceCurrency);
+    const destinationValue = convert(destinationAmount, destinationCurrency);
+    let difference = destinationValue - sourceValue;
+
+    const gross = Number(tx.amount_gross);
+    const net = Number(tx.amount);
+    if (!Number.isNaN(gross) && gross > net) {
+        difference -= convert(gross - net, sourceCurrency);
+    }
+
+    return difference;
+}
+
+export function sumRegularIncome(transactions, convert = (amount) => amount) {
+    return (transactions || [])
+        .filter(isRegularIncome)
+        .reduce((sum, tx) => sum + convert(tx.amount || 0, tx.currency || "ARS"), 0);
+}
+
+export function sumRegularExpense(transactions, convert = (amount) => amount) {
+    return (transactions || [])
+        .filter(isRegularExpense)
+        .reduce((sum, tx) => sum + convert(tx.amount || 0, tx.currency || "ARS"), 0);
+}
+
+export function sumTransferDifferences(transactions, convert = (amount) => amount) {
+    return (transactions || [])
+        .filter((tx) => tx.type === "transfer" && affectsReports(tx))
+        .reduce((sum, tx) => sum + getTransferDifference(tx, convert), 0);
 }

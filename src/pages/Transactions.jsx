@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import PageHeader from "@/components/shared/PageHeader";
 import TransactionForm from "@/components/transactions/TransactionForm";
-import { formatCurrency, formatCurrencyCode, formatDate, TRANSACTION_STATUS, TODAY, getTransferDestinationAmount } from "@/lib/formatters";
+import { formatCurrency, formatCurrencyCode, formatDate, TRANSACTION_STATUS, TODAY, getTransferDestinationAmount, isRegularIncome, isRegularExpense } from "@/lib/formatters";
 import { computeAccountBalance, getRelatedInstallments } from "@/domain/transactions";
 import { useCurrency } from "@/lib/currency-context";
 import { ArrowDownLeft, ArrowUpRight, ArrowLeftRight } from "lucide-react";
@@ -209,8 +209,8 @@ export default function Transactions() {
     const pageEnd = Math.min(page * PAGE_SIZE, totalCount);
 
     const periodSubtotal = useMemo(() => {
-        const income = subtotalRows.filter(t => t.type === "income").reduce((s, t) => s + convert(t.amount || 0, t.currency || displayCurrency), 0);
-        const expense = subtotalRows.filter(t => t.type === "expense").reduce((s, t) => s + convert(t.amount || 0, t.currency || displayCurrency), 0);
+        const income = subtotalRows.filter(isRegularIncome).reduce((s, t) => s + convert(t.amount || 0, t.currency || displayCurrency), 0);
+        const expense = subtotalRows.filter(isRegularExpense).reduce((s, t) => s + convert(t.amount || 0, t.currency || displayCurrency), 0);
         return { income, expense, net: income - expense };
     }, [subtotalRows, convert, displayCurrency]);
 

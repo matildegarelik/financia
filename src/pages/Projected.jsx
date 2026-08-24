@@ -9,7 +9,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import PageHeader from "@/components/shared/PageHeader";
 import CurrencySelector from "@/components/shared/CurrencySelector";
 import TransactionFormProjected from "@/components/transactions/TransactionFormProjected";
-import { formatCurrencyCode, formatDate, getCurrentMonth, getMonthLabel, isRegularExpense } from "@/lib/formatters";
+import { formatCurrencyCode, formatDate, getCurrentMonth, getMonthLabel, isRegularExpense, isRegularIncome, getTransferDifference, affectsReports } from "@/lib/formatters";
 import { computeAccountBalance } from "@/domain/transactions";
 import { cn } from "@/lib/utils";
 import { useCurrency } from "@/lib/currency-context";
@@ -144,20 +144,23 @@ export default function Projected() {
 
         // Transacciones proyectadas: todas (para el listado), solo one-offs (para los totales)
         const projected = transactions.filter((t) => t.status === "projected" && txMonth(t) === yyyymm);
-        const projIncomeTxs = projected.filter((t) => t.type === "income" && !coveredIncCatIds.has(t.category_id));
-        const projExpenseTxs = projected.filter((t) => t.type === "expense" && !coveredExpCatIds.has(t.category_id));
+        const projIncomeTxs = projected.filter((t) => isRegularIncome(t) && !coveredIncCatIds.has(t.category_id));
+        const projExpenseTxs = projected.filter((t) => isRegularExpense(t) && !coveredExpCatIds.has(t.category_id));
 
         const real = transactions.filter((t) => t.status !== "projected" && txMonth(t) === yyyymm);
-        const realIncomeTxs = real.filter((t) => t.type === "income");
+        const realIncomeTxs = real.filter(isRegularIncome);
         const realExpenseTxs = real.filter(isRegularExpense);
+        const realTransferDiff = real
+            .filter((t) => t.type === "transfer" && affectsReports(t))
+            .reduce((s, t) => s + getTransferDifference(t, convert), 0);
 
         const budgetIncome = incomeBudgets.reduce((s, b) => s + convert(b.amount || 0, b.currency || "ARS"), 0);
         const budgetExpense = expenseBudgets.reduce((s, b) => s + convert(b.amount || 0, b.currency || "ARS"), 0);
 
         const projIncome = budgetIncome + projIncomeTxs.reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0);
         const projExpense = budgetExpense + projExpenseTxs.reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0);
-        const realIncome = realIncomeTxs.reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0);
-        const realExpense = realExpenseTxs.reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0);
+        const realIncome = realIncomeTxs.reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0) + Math.max(realTransferDiff, 0);
+        const realExpense = realExpenseTxs.reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0) + Math.max(-realTransferDiff, 0);
 
         // Desglose por moneda: mezclar presupuestos + one-offs
         const projIncomeByC = { ...byCurrency(incomeBudgets) };
@@ -207,10 +210,11 @@ export default function Projected() {
             const txsOfYear = transactions.filter((t) => t.date?.startsWith(year));
             const projTxs = txsOfYear.filter((t) => t.status === "projected");
             const realTxs = txsOfYear.filter((t) => t.status !== "projected");
-            const projInc = projTxs.filter((t) => t.type === "income").reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0);
-            const projExp = projTxs.filter((t) => t.type === "expense").reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0);
-            const realInc = realTxs.filter((t) => t.type === "income").reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0);
-            const realExp = realTxs.filter(isRegularExpense).reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0);
+            const projInc = projTxs.filter(isRegularIncome).reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0);
+            const projExp = projTxs.filter(isRegularExpense).reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0);
+            const transferDiff = realTxs.filter((t) => t.type === "transfer" && affectsReports(t)).reduce((s, t) => s + getTransferDifference(t, convert), 0);
+            const realInc = realTxs.filter(isRegularIncome).reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0) + Math.max(transferDiff, 0);
+            const realExp = realTxs.filter(isRegularExpense).reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0) + Math.max(-transferDiff, 0);
             const isCurrent = year === thisYear;
             // For current year: blend real (past months) + projected (current month onwards)
             const blendedSavings = isCurrent
@@ -220,7 +224,10 @@ export default function Projected() {
                     return mo < currentMonth ? t.status !== "projected" : t.status === "projected";
                 }).reduce((s, t) => {
                     const amt = convert(t.amount || 0, t.currency || "ARS");
-                    return s + (t.type === "income" ? amt : isRegularExpense(t) ? -amt : 0);
+                    if (isRegularIncome(t)) return s + amt;
+                    if (isRegularExpense(t)) return s - amt;
+                    if (t.type === "transfer" && affectsReports(t)) return s + getTransferDifference(t, convert);
+                    return s;
                 }, 0)
                 : realInc - realExp;
             return {

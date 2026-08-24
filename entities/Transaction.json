@@ -107,6 +107,17 @@
         "is_credit_card_payment": {
             "type": "boolean",
             "default": false
+        },
+        "reporting_mode": {
+            "type": "string",
+            "enum": [
+                "normal",
+                "neutral",
+                "investment",
+                "credit_card_payment",
+                "exchange_difference"
+            ],
+            "default": "normal"
         }
     },
     "required": [

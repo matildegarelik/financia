@@ -22,6 +22,7 @@ export default function Investments() {
     const [showForm, setShowForm] = useState(false);
     const [editing, setEditing] = useState(null);
     const [finalizing, setFinalizing] = useState(null);
+    const [withdrawing, setWithdrawing] = useState(null);
     const queryClient = useQueryClient();
     const { convert, displayCurrency } = useCurrency();
 
@@ -52,6 +53,7 @@ export default function Investments() {
                     description: `Inversión: ${d.name}`,
                     category_name: "Inversión",
                     is_investment_transfer: true,
+                    reporting_mode: "investment",
                 });
             }
             return inv;
@@ -94,6 +96,8 @@ export default function Investments() {
                     account_name: acc?.name || "",
                     description: `Inversión finalizada: ${inv.name}`,
                     category_name: "Inversión",
+                    reporting_mode: "investment",
+                    is_investment_transfer: true,
                 });
             }
         },
@@ -102,6 +106,39 @@ export default function Investments() {
             queryClient.invalidateQueries({ queryKey: ["transactions"] });
             setFinalizing(null);
             toast.success("Inversión finalizada y monto acreditado");
+        },
+    });
+
+    const withdrawMut = useMutation({
+        mutationFn: async ({ inv, amount, targetAccountId, withdrawalDate, remainingValue, countAsIncome }) => {
+            const nextCurrentValue = Number.isFinite(remainingValue)
+                ? remainingValue
+                : Math.max(0, (Number(inv.current_value || inv.amount_invested) || 0) - amount);
+            await base44.entities.Investment.update(inv.id, {
+                current_value: nextCurrentValue,
+                withdrawn_amount: (Number(inv.withdrawn_amount) || 0) + amount,
+            });
+
+            const acc = accounts.find((a) => a.id === targetAccountId);
+            await base44.entities.Transaction.create({
+                type: "income",
+                status: "confirmed",
+                date: withdrawalDate || TODAY,
+                amount,
+                currency: inv.currency || "ARS",
+                account_id: targetAccountId,
+                account_name: acc?.name || "",
+                description: `Retiro inversión: ${inv.name}`,
+                category_name: "Inversión",
+                reporting_mode: countAsIncome ? "normal" : "investment",
+                is_investment_transfer: !countAsIncome,
+            });
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ["investments"] });
+            queryClient.invalidateQueries({ queryKey: ["transactions"] });
+            setWithdrawing(null);
+            toast.success("Retiro registrado");
         },
     });
 
@@ -128,6 +165,7 @@ export default function Investments() {
                 {activeInvestments.map((inv, i) => (
                     <InvestmentCard key={inv.id} inv={inv} index={i}
                         onEdit={() => setEditing(inv)}
+                        onWithdraw={() => setWithdrawing(inv)}
                         onFinalize={() => setFinalizing(inv)}
                         onDelete={() => deleteMut.mutate(inv.id)}
                     />
@@ -167,11 +205,21 @@ export default function Investments() {
                     isPending={finalizeMut.isPending}
                 />
             )}
+
+            {withdrawing && (
+                <WithdrawDialog
+                    inv={withdrawing}
+                    accounts={accounts}
+                    onClose={() => setWithdrawing(null)}
+                    onSubmit={(params) => withdrawMut.mutate({ inv: withdrawing, ...params })}
+                    isPending={withdrawMut.isPending}
+                />
+            )}
         </div>
     );
 }
 
-function InvestmentCard({ inv, index, onEdit, onFinalize, onDelete, finalized = false }) {
+function InvestmentCard({ inv, index, onEdit, onWithdraw, onFinalize, onDelete, finalized = false }) {
     const ret = (inv.current_value || inv.amount_invested) - inv.amount_invested;
     const retPct = inv.amount_invested > 0 ? ((ret / inv.amount_invested) * 100).toFixed(1) : 0;
 
@@ -197,6 +245,11 @@ function InvestmentCard({ inv, index, onEdit, onFinalize, onDelete, finalized = 
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
                                 <DropdownMenuItem onClick={onEdit}><Pencil className="h-4 w-4 mr-2" />Editar</DropdownMenuItem>
+                                {!finalized && onWithdraw && (
+                                    <DropdownMenuItem onClick={onWithdraw}>
+                                        <TrendingDown className="h-4 w-4 mr-2" />Retirar
+                                    </DropdownMenuItem>
+                                )}
                                 {!finalized && onFinalize && (
                                     <DropdownMenuItem onClick={onFinalize}>
                                         <CheckCircle2 className="h-4 w-4 mr-2" />Finalizar
@@ -224,6 +277,87 @@ function InvestmentCard({ inv, index, onEdit, onFinalize, onDelete, finalized = 
                 </CardContent>
             </Card>
         </motion.div>
+    );
+}
+
+function WithdrawDialog({ inv, accounts, onClose, onSubmit, isPending }) {
+    const currentValue = Number(inv.current_value || inv.amount_invested) || 0;
+    const [amount, setAmount] = useState("");
+    const [targetAccountId, setTargetAccountId] = useState("");
+    const [withdrawalDate, setWithdrawalDate] = useState(TODAY);
+    const [remainingValue, setRemainingValue] = useState(String(currentValue));
+    const [countAsIncome, setCountAsIncome] = useState(false);
+
+    return (
+        <Dialog open onOpenChange={onClose}>
+            <DialogContent className="max-w-sm">
+                <DialogHeader>
+                    <DialogTitle>Retirar inversión</DialogTitle>
+                </DialogHeader>
+                <p className="text-sm text-muted-foreground -mt-2">{inv.name}</p>
+                <form onSubmit={(e) => {
+                    e.preventDefault();
+                    onSubmit({
+                        amount: parseFloat(amount) || 0,
+                        targetAccountId,
+                        withdrawalDate,
+                        remainingValue: parseFloat(remainingValue),
+                        countAsIncome,
+                    });
+                }} className="space-y-4">
+                    <div>
+                        <Label>Monto a retirar ({inv.currency || "ARS"})</Label>
+                        <Input type="number" step="0.01" min="0" value={amount}
+                            onChange={(e) => {
+                                setAmount(e.target.value);
+                                const parsed = parseFloat(e.target.value) || 0;
+                                setRemainingValue(String(Math.max(0, currentValue - parsed)));
+                            }} required />
+                    </div>
+                    <div>
+                        <Label>Valor actual restante</Label>
+                        <Input type="number" step="0.01" min="0" value={remainingValue}
+                            onChange={(e) => setRemainingValue(e.target.value)} required />
+                    </div>
+                    <div>
+                        <Label>Acreditar a cuenta</Label>
+                        <Select value={targetAccountId} onValueChange={setTargetAccountId} required>
+                            <SelectTrigger><SelectValue placeholder="Seleccionar cuenta" /></SelectTrigger>
+                            <SelectContent>
+                                {[...accounts].sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999)).map((a) => (
+                                    <SelectItem key={a.id} value={a.id}>{a.name} ({a.currency || "ARS"})</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div>
+                        <Label>Fecha</Label>
+                        <Input type="date" value={withdrawalDate}
+                            onChange={(e) => setWithdrawalDate(e.target.value)} required />
+                    </div>
+                    <label className="flex items-start gap-2 rounded-lg border border-border/60 bg-muted/20 p-3 cursor-pointer">
+                        <input
+                            type="checkbox"
+                            className="mt-1"
+                            checked={countAsIncome}
+                            onChange={(e) => setCountAsIncome(e.target.checked)}
+                        />
+                        <span className="text-sm leading-tight">
+                            Contar como ingreso
+                            <span className="block text-xs text-muted-foreground mt-0.5">
+                                Si no, acredita saldo pero queda fuera de ingresos/gastos.
+                            </span>
+                        </span>
+                    </label>
+                    <div className="flex gap-3">
+                        <Button type="button" variant="outline" className="flex-1" onClick={onClose}>Cancelar</Button>
+                        <Button type="submit" className="flex-1" disabled={isPending || !targetAccountId}>
+                            {isPending ? "Guardando..." : "Retirar"}
+                        </Button>
+                    </div>
+                </form>
+            </DialogContent>
+        </Dialog>
     );
 }
 

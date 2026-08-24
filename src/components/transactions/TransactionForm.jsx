@@ -8,6 +8,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ChevronDown } from "lucide-react";
 import { useCurrency } from "@/lib/currency-context";
+import { Checkbox } from "@/components/ui/checkbox";
+import { getReportingMode } from "@/lib/formatters";
 
 function makeGroupId() {
     if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
@@ -50,11 +52,13 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
             installment_total: "",
             installment_current: "",
             probability: 80,
+            reporting_mode: "normal",
             ...(init ? {
                 ...init,
                 amount: String(init.amount || ""),
                 amount_gross: String(init.amount_gross || ""),
                 to_amount: String(init.to_amount || ""),
+                reporting_mode: getReportingMode(init),
             } : {}),
         };
     }
@@ -108,6 +112,7 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
             category_id: form.category_id || null,
             account_id: form.account_id || null,
             to_account_id: form.to_account_id || null,
+            reporting_mode: form.reporting_mode || "normal",
         });
     };
 
@@ -267,6 +272,21 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
                                 </SelectContent>
                             </Select>
                         </div>
+                    )}
+
+                    {form.type !== "transfer" && (
+                        <label className="flex items-start gap-2 rounded-lg border border-border/60 bg-muted/20 p-3 cursor-pointer">
+                            <Checkbox
+                                checked={form.reporting_mode === "neutral"}
+                                onCheckedChange={(checked) => set("reporting_mode", checked ? "neutral" : "normal")}
+                            />
+                            <span className="text-sm leading-tight">
+                                No contar en ingresos/gastos
+                                <span className="block text-xs text-muted-foreground mt-0.5">
+                                    Afecta saldos y tarjetas, pero queda fuera de reportes.
+                                </span>
+                            </span>
+                        </label>
                     )}
 
                     {/* Campos de cuota/recurrente — solo cuando status === installment */}

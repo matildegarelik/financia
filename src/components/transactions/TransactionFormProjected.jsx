@@ -5,6 +5,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useCurrency } from "@/lib/currency-context";
+import { Checkbox } from "@/components/ui/checkbox";
+import { getReportingMode } from "@/lib/formatters";
 
 export default function TransactionFormProjected({ open, onClose, onSubmit, accounts = [], categories = [], initial, defaultMonth }) {
     const { activeCurrencies } = useCurrency();
@@ -27,7 +29,8 @@ export default function TransactionFormProjected({ open, onClose, onSubmit, acco
             date: defaultDate,
             project_name: "",
             client_name: "",
-            ...(init ? { ...init, amount: String(init.amount || "") } : {}),
+            reporting_mode: "normal",
+            ...(init ? { ...init, amount: String(init.amount || ""), reporting_mode: getReportingMode(init) } : {}),
         };
     }
 
@@ -52,6 +55,7 @@ export default function TransactionFormProjected({ open, onClose, onSubmit, acco
             status: "projected",
             category_id: form.category_id || null,
             account_id: form.account_id || null,
+            reporting_mode: form.reporting_mode || "normal",
         });
     };
 
@@ -159,6 +163,19 @@ export default function TransactionFormProjected({ open, onClose, onSubmit, acco
                             </Select>
                         </div>
                     )}
+
+                    <label className="flex items-start gap-2 rounded-lg border border-border/60 bg-muted/20 p-3 cursor-pointer">
+                        <Checkbox
+                            checked={form.reporting_mode === "neutral"}
+                            onCheckedChange={(checked) => set("reporting_mode", checked ? "neutral" : "normal")}
+                        />
+                        <span className="text-sm leading-tight">
+                            No contar en ingresos/gastos
+                            <span className="block text-xs text-muted-foreground mt-0.5">
+                                Visible en proyecciones, pero fuera de los totales.
+                            </span>
+                        </span>
+                    </label>
 
                     <div className="grid grid-cols-2 gap-2">
                         <div>

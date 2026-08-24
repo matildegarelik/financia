@@ -12,7 +12,7 @@ import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import CurrencySelector from "@/components/shared/CurrencySelector";
 import SpendingChart from "@/components/dashboard/SpendingChart";
-import { formatCurrencyCode, formatDate, getCurrentMonth, TODAY, isRegularExpense, getTransferDestinationAmount } from "@/lib/formatters";
+import { formatCurrencyCode, formatDate, getCurrentMonth, TODAY, isRegularExpense, isRegularIncome, getTransferDestinationAmount, sumTransferDifferences } from "@/lib/formatters";
 import { computeAccountBalance } from "@/domain/transactions";
 import { useCurrency } from "@/lib/currency-context";
 import { cn } from "@/lib/utils";
@@ -63,13 +63,16 @@ export default function Dashboard() {
             t.date?.startsWith(currentMonth) && t.date <= TODAY && t.status !== "projected"
         ), [transactions, currentMonth]);
 
+    const transferDifference = useMemo(() => sumTransferDifferences(monthlyTx, convert), [monthlyTx, convert]);
+
     const monthlyIncome = useMemo(() =>
-        monthlyTx.filter((t) => t.type === "income").reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0),
-        [monthlyTx, convert]);
+        monthlyTx.filter(isRegularIncome).reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0) + Math.max(transferDifference, 0),
+        [monthlyTx, convert, transferDifference]);
 
     const monthlyExpense = useMemo(() =>
-        monthlyTx.filter(isRegularExpense).reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0),
-        [monthlyTx, convert]);
+        monthlyTx.filter(isRegularExpense).reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0) + Math.max(-transferDifference, 0),
+        [monthlyTx, convert, transferDifference]);
+
 
     const netMonth = monthlyIncome - monthlyExpense;
 
