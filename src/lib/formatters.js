@@ -118,6 +118,20 @@ export const isCreditCardAccount = (account) => account?.type === "credit_card";
 
 export const isCreditCardPayment = (tx) => Boolean(tx?.is_credit_card_payment);
 
+function findCreditCardStatement(tx, statements = []) {
+    if (!tx) return null;
+    if (tx.credit_card_statement_id) {
+        const linked = statements.find((statement) => statement.id === tx.credit_card_statement_id);
+        if (linked) return linked;
+    }
+    return statements.find((statement) =>
+        statement.account_id === tx.account_id &&
+        tx.date &&
+        tx.date >= statement.period_start &&
+        tx.date <= statement.period_end
+    ) || null;
+}
+
 function clampDay(year, monthIndex, day) {
     const last = new Date(year, monthIndex + 1, 0).getDate();
     return Math.min(Math.max(parseInt(day) || 1, 1), last);
@@ -168,6 +182,19 @@ export function getCreditCardStatementRange(account, referenceDate = TODAY) {
 export function getPreviousCreditCardStatementRange(account, referenceDate = TODAY) {
     const current = getCreditCardStatementRange(account, referenceDate);
     return getCreditCardStatementRange(account, addDaysISO(current.period_start, -1));
+}
+
+export function getReportingDate(tx, { accounts = [], statements = [] } = {}) {
+    if (!tx?.date) return "";
+    if (!isRegularExpense(tx) || isCreditCardPayment(tx)) return tx.date;
+
+    const account = accounts.find((item) => item.id === tx.account_id);
+    if (!isCreditCardAccount(account)) return tx.date;
+
+    const statement = findCreditCardStatement(tx, statements);
+    if (statement?.due_date) return statement.due_date;
+
+    return getCreditCardStatementRange(account, tx.date).due_date || tx.date;
 }
 
 export function transactionMatchesStatement(tx, statement) {

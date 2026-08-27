@@ -12,7 +12,7 @@ import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import CurrencySelector from "@/components/shared/CurrencySelector";
 import SpendingChart from "@/components/dashboard/SpendingChart";
-import { formatCurrencyCode, formatDate, getCurrentMonth, TODAY, isRegularExpense, isRegularIncome, getTransferDestinationAmount, sumTransferDifferences } from "@/lib/formatters";
+import { formatCurrencyCode, formatDate, getCurrentMonth, getReportingDate, TODAY, isRegularExpense, isRegularIncome, getTransferDestinationAmount, sumTransferDifferences } from "@/lib/formatters";
 import { computeAccountBalance } from "@/domain/transactions";
 import { useCurrency } from "@/lib/currency-context";
 import { cn } from "@/lib/utils";
@@ -37,6 +37,10 @@ export default function Dashboard() {
         queryKey: ["accounts"],
         queryFn: () => base44.entities.Account.list(),
     });
+    const { data: statements = [] } = useQuery({
+        queryKey: ["credit_card_statements"],
+        queryFn: () => base44.entities.CreditCardStatement.list(),
+    });
     const { data: budgets = [] } = useQuery({
         queryKey: ["budgets"],
         queryFn: () => base44.entities.Budget.list(),
@@ -60,8 +64,10 @@ export default function Dashboard() {
 
     const monthlyTx = useMemo(() =>
         transactions.filter((t) =>
-            t.date?.startsWith(currentMonth) && t.date <= TODAY && t.status !== "projected"
-        ), [transactions, currentMonth]);
+            getReportingDate(t, { accounts, statements })?.startsWith(currentMonth) &&
+            getReportingDate(t, { accounts, statements }) <= TODAY &&
+            t.status !== "projected"
+        ), [transactions, accounts, statements, currentMonth]);
 
     const transferDifference = useMemo(() => sumTransferDifferences(monthlyTx, convert), [monthlyTx, convert]);
 
@@ -136,7 +142,8 @@ export default function Dashboard() {
         return transactions
             .filter((tx) => {
                 if (!isRegularExpense(tx) || tx.status === "projected") return false;
-                if (!tx.date || tx.date < monthStart || tx.date > monthEnd) return false;
+                const reportingDate = getReportingDate(tx, { accounts, statements });
+                if (!reportingDate || reportingDate < monthStart || reportingDate > monthEnd) return false;
                 if (matchIds && tx.category_id && matchIds.has(tx.category_id)) return true;
                 if (!matchIds && b.category_name && tx.category_name === b.category_name) return true;
                 return false;

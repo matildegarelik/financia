@@ -9,7 +9,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import PageHeader from "@/components/shared/PageHeader";
 import CurrencySelector from "@/components/shared/CurrencySelector";
 import TransactionFormProjected from "@/components/transactions/TransactionFormProjected";
-import { formatCurrencyCode, formatDate, getCurrentMonth, getMonthLabel, isRegularExpense, isRegularIncome, getTransferDifference, affectsReports } from "@/lib/formatters";
+import { formatCurrencyCode, formatDate, getCurrentMonth, getMonthLabel, getReportingDate, isRegularExpense, isRegularIncome, getTransferDifference, affectsReports } from "@/lib/formatters";
 import { computeAccountBalance } from "@/domain/transactions";
 import { cn } from "@/lib/utils";
 import { useCurrency } from "@/lib/currency-context";
@@ -23,6 +23,11 @@ function addMonths(yyyymm, n) {
 
 function txMonth(tx) {
     return tx.date ? tx.date.slice(0, 7) : null;
+}
+
+function txReportingMonth(tx, context) {
+    const reportingDate = getReportingDate(tx, context);
+    return reportingDate ? reportingDate.slice(0, 7) : null;
 }
 
 const MONTH_NAMES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
@@ -48,6 +53,7 @@ export default function Projected() {
         queryFn: () => base44.entities.Transaction.list("-date", 500),
     });
     const { data: accounts = [] } = useQuery({ queryKey: ["accounts"], queryFn: () => base44.entities.Account.list() });
+    const { data: statements = [] } = useQuery({ queryKey: ["credit_card_statements"], queryFn: () => base44.entities.CreditCardStatement.list() });
     const { data: categories = [] } = useQuery({ queryKey: ["categories"], queryFn: () => base44.entities.Category.list() });
     const { data: investments = [] } = useQuery({ queryKey: ["investments"], queryFn: () => base44.entities.Investment.list() });
     const { data: budgets = [] } = useQuery({ queryKey: ["budgets"], queryFn: () => base44.entities.Budget.list() });
@@ -147,7 +153,8 @@ export default function Projected() {
         const projIncomeTxs = projected.filter((t) => isRegularIncome(t) && !coveredIncCatIds.has(t.category_id));
         const projExpenseTxs = projected.filter((t) => isRegularExpense(t) && !coveredExpCatIds.has(t.category_id));
 
-        const real = transactions.filter((t) => t.status !== "projected" && txMonth(t) === yyyymm);
+        const reportingContext = { accounts, statements };
+        const real = transactions.filter((t) => t.status !== "projected" && txReportingMonth(t, reportingContext) === yyyymm);
         const realIncomeTxs = real.filter(isRegularIncome);
         const realExpenseTxs = real.filter(isRegularExpense);
         const realTransferDiff = real
@@ -179,7 +186,7 @@ export default function Projected() {
         };
     }
 
-    const monthData = useMemo(() => computeMonth(selectedMonth), [transactions, selectedMonth, convert, budgets, categories]);
+    const monthData = useMemo(() => computeMonth(selectedMonth), [transactions, selectedMonth, convert, budgets, categories, accounts, statements]);
     const { projected, projIncome, projExpense, projSavings, realIncome, realExpense, realSavings,
         projIncomeByC, projExpenseByC, realIncomeByC, realExpenseByC, incomeBudgets, expenseBudgets } = monthData;
 
@@ -191,7 +198,7 @@ export default function Projected() {
         const m = String(i + 1).padStart(2, "0");
         const yyyymm = `${selectedYear}-${m}`;
         return { yyyymm, monthName: MONTH_NAMES[i], ...computeMonth(yyyymm) };
-    }), [transactions, selectedYear, convert, budgets, categories]);
+    }), [transactions, selectedYear, convert, budgets, categories, accounts, statements]);
 
     const yearTotal = useMemo(() => yearMonths.reduce((acc, m) => ({
         projIncome: acc.projIncome + m.projIncome,
@@ -203,11 +210,17 @@ export default function Projected() {
     }), { projIncome: 0, projExpense: 0, projSavings: 0, realIncome: 0, realExpense: 0, realSavings: 0 }), [yearMonths]);
 
     const allYears = useMemo(() => {
-        const years = [...new Set(transactions.map((t) => t.date?.slice(0, 4)).filter(Boolean))].sort();
+        const reportingContext = { accounts, statements };
+        const years = [...new Set(transactions.map((t) =>
+            t.status === "projected" ? t.date?.slice(0, 4) : getReportingDate(t, reportingContext)?.slice(0, 4)
+        ).filter(Boolean))].sort();
         const thisYear = String(new Date().getFullYear());
         if (!years.includes(thisYear)) years.push(thisYear);
         return years.map((year) => {
-            const txsOfYear = transactions.filter((t) => t.date?.startsWith(year));
+            const txsOfYear = transactions.filter((t) => {
+                const date = t.status === "projected" ? t.date : getReportingDate(t, reportingContext);
+                return date?.startsWith(year);
+            });
             const projTxs = txsOfYear.filter((t) => t.status === "projected");
             const realTxs = txsOfYear.filter((t) => t.status !== "projected");
             const projInc = projTxs.filter(isRegularIncome).reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0);
@@ -219,7 +232,7 @@ export default function Projected() {
             // For current year: blend real (past months) + projected (current month onwards)
             const blendedSavings = isCurrent
                 ? txsOfYear.filter((t) => {
-                    const mo = t.date?.slice(0, 7);
+                    const mo = t.status === "projected" ? t.date?.slice(0, 7) : txReportingMonth(t, reportingContext);
                     if (!mo) return false;
                     return mo < currentMonth ? t.status !== "projected" : t.status === "projected";
                 }).reduce((s, t) => {
@@ -238,7 +251,7 @@ export default function Projected() {
                 isCurrent,
             };
         });
-    }, [transactions, convert, budgets, categories]);
+    }, [transactions, convert, budgets, categories, accounts, statements]);
 
     function CurrencyLines({ byC, total, colorClass = "" }) {
         const [expanded, setExpanded] = useState(false);

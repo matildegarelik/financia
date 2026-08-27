@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import PageHeader from "@/components/shared/PageHeader";
-import { formatCurrencyCode, isRegularExpense, isRegularIncome } from "@/lib/formatters";
+import { formatCurrencyCode, getReportingDate, isRegularExpense, isRegularIncome } from "@/lib/formatters";
 import { useCurrency } from "@/lib/currency-context";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
@@ -39,6 +39,8 @@ export default function Budgets() {
         queryKey: ["transactions"],
         queryFn: () => base44.entities.Transaction.list(),
     });
+    const { data: accounts = [] } = useQuery({ queryKey: ["accounts"], queryFn: () => base44.entities.Account.list() });
+    const { data: statements = [] } = useQuery({ queryKey: ["credit_card_statements"], queryFn: () => base44.entities.CreditCardStatement.list() });
     const { data: categories = [] } = useQuery({ queryKey: ["categories"], queryFn: () => base44.entities.Category.list() });
 
     // Budgets for current month (month matches OR budget has no month = template)
@@ -60,8 +62,9 @@ export default function Budgets() {
         return transactions
             .filter((tx) => {
                 if (isIncome ? !isRegularIncome(tx) : !isRegularExpense(tx)) return false;
-                if (!tx.date) return false;
-                if (tx.date < monthStart || tx.date > monthEnd) return false;
+                const reportingDate = getReportingDate(tx, { accounts, statements });
+                if (!reportingDate) return false;
+                if (reportingDate < monthStart || reportingDate > monthEnd) return false;
                 if (tx.status === "projected") return false;
                 if (matchIds && tx.category_id && matchIds.has(tx.category_id)) return true;
                 if (!matchIds && budget.category_name && tx.category_name === budget.category_name) return true;

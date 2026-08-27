@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import PageHeader from "@/components/shared/PageHeader";
 import CurrencySelector from "@/components/shared/CurrencySelector";
 import { useCurrency } from "@/lib/currency-context";
-import { formatCurrency, getMonthLabel, TODAY, isRegularExpense, isRegularIncome, getTransferDifference, affectsReports } from "@/lib/formatters";
+import { formatCurrency, getMonthLabel, getReportingDate, TODAY, isRegularExpense, isRegularIncome, getTransferDifference, affectsReports } from "@/lib/formatters";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
@@ -85,6 +85,10 @@ export default function Analytics() {
         queryKey: ["accounts"],
         queryFn: () => base44.entities.Account.list(),
     });
+    const { data: statements = [] } = useQuery({
+        queryKey: ["credit_card_statements"],
+        queryFn: () => base44.entities.CreditCardStatement.list(),
+    });
 
     const handleRangePreset = (value) => {
         setRangePreset(value);
@@ -132,10 +136,11 @@ export default function Analytics() {
 
     const filteredTransactions = useMemo(() => {
         return transactions.filter((t) => {
-            if (!t.date || t.date > TODAY) return false;
+            const reportingDate = getReportingDate(t, { accounts, statements });
+            if (!reportingDate || reportingDate > TODAY) return false;
             if (t.status !== "confirmed" && t.status !== "installment") return false;
-            if (dateFrom && t.date < dateFrom) return false;
-            if (dateTo && t.date > dateTo) return false;
+            if (dateFrom && reportingDate < dateFrom) return false;
+            if (dateTo && reportingDate > dateTo) return false;
             if (categoryMode === "income") return isRegularIncome(t) || (t.type === "transfer" && affectsReports(t) && getTransferDifference(t, convert) > 0);
             if (categoryMode === "expense") return isRegularExpense(t) || (t.type === "transfer" && affectsReports(t) && getTransferDifference(t, convert) < 0);
             if (categoryMode === "custom") {
@@ -144,7 +149,7 @@ export default function Analytics() {
             }
             return true;
         });
-    }, [transactions, dateFrom, dateTo, categoryMode, selectedCategoryIds, selectedCategoryFilter]);
+    }, [transactions, accounts, statements, dateFrom, dateTo, categoryMode, selectedCategoryIds, selectedCategoryFilter, convert]);
 
     const groupByDay = daysBetween(dateFrom, dateTo) <= 62;
     const selectedCategoryNames = selectedCategoryIds
@@ -166,7 +171,8 @@ export default function Analytics() {
     const data = useMemo(() => {
         const byPeriod = {};
         filteredTransactions.forEach((t) => {
-            const key = groupByDay ? t.date : getMonthKey(t.date);
+            const reportingDate = getReportingDate(t, { accounts, statements });
+            const key = groupByDay ? reportingDate : getMonthKey(reportingDate);
             if (!key) return;
             if (!byPeriod[key]) byPeriod[key] = { income: 0, expense: 0 };
             const amt = convert(t.amount || 0, t.currency || "ARS");
@@ -188,7 +194,7 @@ export default function Analytics() {
             expense: Math.round(byPeriod[key]?.expense || 0),
             saving: Math.round((byPeriod[key]?.income || 0) - (byPeriod[key]?.expense || 0)),
         }));
-    }, [filteredTransactions, displayCurrency, convert, groupByDay]);
+    }, [filteredTransactions, accounts, statements, displayCurrency, convert, groupByDay]);
 
     // Cumulative savings
     const cumulativeData = useMemo(() => {
