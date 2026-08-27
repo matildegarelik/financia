@@ -142,6 +142,29 @@ function isoFromParts(year, monthIndex, day) {
     return d.toISOString().split("T")[0];
 }
 
+function getDefaultCreditCardCloseDate(year, monthIndex) {
+    const d = new Date(year, monthIndex + 1, 0, 12);
+    let thursdaysSeen = 0;
+
+    while (d.getMonth() === monthIndex) {
+        if (d.getDay() === 4) {
+            thursdaysSeen += 1;
+            if (thursdaysSeen === 2) return d.toISOString().split("T")[0];
+        }
+        d.setDate(d.getDate() - 1);
+    }
+
+    return d.toISOString().split("T")[0];
+}
+
+function getDefaultCreditCardDueDate(year, monthIndex) {
+    const d = new Date(year, monthIndex + 1, 1, 12);
+    const day = d.getDay();
+    const daysUntilMonday = (1 - day + 7) % 7;
+    d.setDate(1 + daysUntilMonday);
+    return d.toISOString().split("T")[0];
+}
+
 export function addDaysISO(dateStr, days) {
     const d = new Date(`${dateStr}T12:00:00`);
     d.setDate(d.getDate() + days);
@@ -158,24 +181,34 @@ export function addMonthsISO(dateStr, months) {
 }
 
 export function getCreditCardStatementRange(account, referenceDate = TODAY) {
-    const closeDay = parseInt(account?.statement_close_day) || 25;
-    const dueDay = parseInt(account?.statement_due_day) || Math.min(closeDay + 10, 28);
+    const configuredCloseDay = parseInt(account?.statement_close_day);
+    const configuredDueDay = parseInt(account?.statement_due_day);
     const ref = new Date(`${referenceDate}T12:00:00`);
+    const closeDay = configuredCloseDay || new Date(`${getDefaultCreditCardCloseDate(ref.getFullYear(), ref.getMonth())}T12:00:00`).getDate();
     const refDay = ref.getDate();
     const closeMonthOffset = refDay <= closeDay ? 0 : 1;
     const closeBase = new Date(ref.getFullYear(), ref.getMonth() + closeMonthOffset, 1);
-    const closeDate = isoFromParts(closeBase.getFullYear(), closeBase.getMonth(), closeDay);
+    const closeDate = configuredCloseDay
+        ? isoFromParts(closeBase.getFullYear(), closeBase.getMonth(), configuredCloseDay)
+        : getDefaultCreditCardCloseDate(closeBase.getFullYear(), closeBase.getMonth());
     const prevCloseBase = new Date(closeBase.getFullYear(), closeBase.getMonth() - 1, 1);
-    const prevCloseDate = isoFromParts(prevCloseBase.getFullYear(), prevCloseBase.getMonth(), closeDay);
+    const prevCloseDate = configuredCloseDay
+        ? isoFromParts(prevCloseBase.getFullYear(), prevCloseBase.getMonth(), configuredCloseDay)
+        : getDefaultCreditCardCloseDate(prevCloseBase.getFullYear(), prevCloseBase.getMonth());
     const periodStart = addDaysISO(prevCloseDate, 1);
-    const dueBaseOffset = dueDay <= closeDay ? 1 : 0;
-    const dueBase = new Date(closeBase.getFullYear(), closeBase.getMonth() + dueBaseOffset, 1);
+    const dueDate = configuredDueDay
+        ? (() => {
+            const dueBaseOffset = configuredDueDay <= closeDay ? 1 : 0;
+            const dueBase = new Date(closeBase.getFullYear(), closeBase.getMonth() + dueBaseOffset, 1);
+            return isoFromParts(dueBase.getFullYear(), dueBase.getMonth(), configuredDueDay);
+        })()
+        : getDefaultCreditCardDueDate(closeBase.getFullYear(), closeBase.getMonth());
 
     return {
         period_start: periodStart,
         period_end: closeDate,
         close_date: closeDate,
-        due_date: isoFromParts(dueBase.getFullYear(), dueBase.getMonth(), dueDay),
+        due_date: dueDate,
     };
 }
 

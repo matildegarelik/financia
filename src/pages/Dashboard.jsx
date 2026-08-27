@@ -12,8 +12,10 @@ import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import CurrencySelector from "@/components/shared/CurrencySelector";
 import SpendingChart from "@/components/dashboard/SpendingChart";
-import { formatCurrencyCode, formatDate, getCurrentMonth, getReportingDate, TODAY, isRegularExpense, isRegularIncome, getTransferDestinationAmount, sumTransferDifferences } from "@/lib/formatters";
+import { formatCurrencyCode, formatDate, getCurrentMonth, TODAY, getTransferDestinationAmount } from "@/lib/formatters";
 import { computeAccountBalance } from "@/domain/transactions";
+import { getBudgetProgress, getMonthBudgets, splitBudgetsByType } from "@/domain/budgets";
+import { filterReportTransactions, sumIncomeExpense } from "@/domain/reporting";
 import { useCurrency } from "@/lib/currency-context";
 import { cn } from "@/lib/utils";
 import { format as fnsFormat, startOfMonth, endOfMonth } from "date-fns";
@@ -62,24 +64,17 @@ export default function Dashboard() {
     const hour = new Date().getHours();
     const greeting = hour < 12 ? "Buenos días" : hour < 18 ? "Buenas tardes" : "Buenas noches";
 
+    const reportingContext = useMemo(() => ({ accounts, statements }), [accounts, statements]);
     const monthlyTx = useMemo(() =>
-        transactions.filter((t) =>
-            getReportingDate(t, { accounts, statements })?.startsWith(currentMonth) &&
-            getReportingDate(t, { accounts, statements }) <= TODAY &&
-            t.status !== "projected"
-        ), [transactions, accounts, statements, currentMonth]);
-
-    const transferDifference = useMemo(() => sumTransferDifferences(monthlyTx, convert), [monthlyTx, convert]);
-
-    const monthlyIncome = useMemo(() =>
-        monthlyTx.filter(isRegularIncome).reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0) + Math.max(transferDifference, 0),
-        [monthlyTx, convert, transferDifference]);
-
-    const monthlyExpense = useMemo(() =>
-        monthlyTx.filter(isRegularExpense).reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0) + Math.max(-transferDifference, 0),
-        [monthlyTx, convert, transferDifference]);
-
-
+        filterReportTransactions(transactions, {
+            from: monthStart,
+            to: monthEnd,
+            today: TODAY,
+            context: reportingContext,
+        }), [transactions, monthStart, monthEnd, reportingContext]);
+    const monthTotals = useMemo(() => sumIncomeExpense(monthlyTx, convert), [monthlyTx, convert]);
+    const monthlyIncome = monthTotals.income;
+    const monthlyExpense = monthTotals.expense;
     const netMonth = monthlyIncome - monthlyExpense;
 
     const computeEffective = (acc) => computeAccountBalance(acc, transactions);
@@ -127,28 +122,16 @@ export default function Dashboard() {
     }, [effectiveDashTab, recentTx, transactions]);
 
     const monthBudgets = useMemo(() =>
-        budgets.filter((b) => b.month === currentMonth && categories.find((c) => c.id === b.category_id)?.type !== "income").slice(0, 6),
+        splitBudgetsByType(getMonthBudgets(budgets, currentMonth), categories).expenseBudgets.slice(0, 6),
         [budgets, currentMonth, categories]);
 
-    const getMatchingCategoryIds = (budget) => {
-        if (!budget.category_id) return null;
-        const ids = new Set([budget.category_id]);
-        categories.forEach((c) => { if (c.parent_category === budget.category_id) ids.add(c.id); });
-        return ids;
-    };
-
     const getBudgetSpent = (b) => {
-        const matchIds = getMatchingCategoryIds(b);
-        return transactions
-            .filter((tx) => {
-                if (!isRegularExpense(tx) || tx.status === "projected") return false;
-                const reportingDate = getReportingDate(tx, { accounts, statements });
-                if (!reportingDate || reportingDate < monthStart || reportingDate > monthEnd) return false;
-                if (matchIds && tx.category_id && matchIds.has(tx.category_id)) return true;
-                if (!matchIds && b.category_name && tx.category_name === b.category_name) return true;
-                return false;
-            })
-            .reduce((s, tx) => s + (tx.amount || 0), 0);
+        return getBudgetProgress(b, transactions, {
+            categories,
+            from: monthStart,
+            to: monthEnd,
+            context: reportingContext,
+        });
     };
 
     const isLoading = loadingTx || loadingAcc;

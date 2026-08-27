@@ -13,13 +13,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import PageHeader from "@/components/shared/PageHeader";
 import CurrencySelector from "@/components/shared/CurrencySelector";
 import { useCurrency } from "@/lib/currency-context";
-import { formatCurrency, getMonthLabel, getReportingDate, TODAY, isRegularExpense, isRegularIncome, getTransferDifference, affectsReports } from "@/lib/formatters";
+import { formatCurrency, getMonthLabel, TODAY, isRegularExpense, getTransferDifference, affectsReports } from "@/lib/formatters";
+import {
+    filterReportTransactions,
+    getMonthKey,
+    getPaymentMethodData,
+    getTopExpenseCategories,
+    groupIncomeExpenseByPeriod,
+    transactionMatchesReportType,
+} from "@/domain/reporting";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-
-function getMonthKey(dateStr) {
-    return dateStr?.slice(0, 7) || "";
-}
 
 function toISODate(date) {
     return date.toISOString().split("T")[0];
@@ -134,22 +138,23 @@ export default function Analytics() {
         return { ids: expandedIds, names };
     }, [categories, selectedCategoryIds]);
 
+    const reportingContext = useMemo(() => ({ accounts, statements }), [accounts, statements]);
+
     const filteredTransactions = useMemo(() => {
-        return transactions.filter((t) => {
-            const reportingDate = getReportingDate(t, { accounts, statements });
-            if (!reportingDate || reportingDate > TODAY) return false;
-            if (t.status !== "confirmed" && t.status !== "installment") return false;
-            if (dateFrom && reportingDate < dateFrom) return false;
-            if (dateTo && reportingDate > dateTo) return false;
-            if (categoryMode === "income") return isRegularIncome(t) || (t.type === "transfer" && affectsReports(t) && getTransferDifference(t, convert) > 0);
-            if (categoryMode === "expense") return isRegularExpense(t) || (t.type === "transfer" && affectsReports(t) && getTransferDifference(t, convert) < 0);
+        return filterReportTransactions(transactions, {
+            from: dateFrom,
+            to: dateTo,
+            today: TODAY,
+            context: reportingContext,
+        }).filter((t) => {
+            if (categoryMode === "income" || categoryMode === "expense") return transactionMatchesReportType(t, categoryMode, convert);
             if (categoryMode === "custom") {
                 if (selectedCategoryIds.length === 0) return true;
                 return selectedCategoryFilter.ids.has(t.category_id) || selectedCategoryFilter.names.has(t.category_name);
             }
             return true;
         });
-    }, [transactions, accounts, statements, dateFrom, dateTo, categoryMode, selectedCategoryIds, selectedCategoryFilter, convert]);
+    }, [transactions, dateFrom, dateTo, reportingContext, categoryMode, selectedCategoryIds, selectedCategoryFilter, convert]);
 
     const groupByDay = daysBetween(dateFrom, dateTo) <= 62;
     const selectedCategoryNames = selectedCategoryIds
@@ -169,20 +174,10 @@ export default function Analytics() {
     const periodLabel = groupByDay ? "día" : "mes";
 
     const data = useMemo(() => {
-        const byPeriod = {};
-        filteredTransactions.forEach((t) => {
-            const reportingDate = getReportingDate(t, { accounts, statements });
-            const key = groupByDay ? reportingDate : getMonthKey(reportingDate);
-            if (!key) return;
-            if (!byPeriod[key]) byPeriod[key] = { income: 0, expense: 0 };
-            const amt = convert(t.amount || 0, t.currency || "ARS");
-            if (isRegularIncome(t)) byPeriod[key].income += amt;
-            else if (isRegularExpense(t)) byPeriod[key].expense += amt;
-            else if (t.type === "transfer" && affectsReports(t)) {
-                const diff = getTransferDifference(t, convert);
-                if (diff > 0) byPeriod[key].income += diff;
-                if (diff < 0) byPeriod[key].expense += Math.abs(diff);
-            }
+        const byPeriod = groupIncomeExpenseByPeriod(filteredTransactions, {
+            context: reportingContext,
+            convert,
+            getKey: (reportingDate) => groupByDay ? reportingDate : getMonthKey(reportingDate),
         });
 
         const sortedKeys = Object.keys(byPeriod).sort();
@@ -194,7 +189,7 @@ export default function Analytics() {
             expense: Math.round(byPeriod[key]?.expense || 0),
             saving: Math.round((byPeriod[key]?.income || 0) - (byPeriod[key]?.expense || 0)),
         }));
-    }, [filteredTransactions, accounts, statements, displayCurrency, convert, groupByDay]);
+    }, [filteredTransactions, reportingContext, convert, groupByDay]);
 
     // Cumulative savings
     const cumulativeData = useMemo(() => {
@@ -223,26 +218,12 @@ export default function Analytics() {
                 const diff = getTransferDifference(t, convert);
                 if (diff < 0) map["Diferencia de transferencia"] = (map["Diferencia de transferencia"] || 0) + Math.abs(diff);
             });
-        return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 8);
-    }, [filteredTransactions, displayCurrency, convert]);
-
-    const cardAccountIds = useMemo(
-        () => new Set(accounts.filter((a) => a.type === "credit_card").map((a) => a.id)),
-        [accounts]
-    );
+        return getTopExpenseCategories(filteredTransactions, convert, { limit: 8, includeTransferDifferences: true });
+    }, [filteredTransactions, convert]);
 
     const paymentMethodData = useMemo(() => {
-        const totals = { card: 0, other: 0 };
-        filteredTransactions.filter(isRegularExpense).forEach((t) => {
-            const amt = convert(t.amount || 0, t.currency || "ARS");
-            if (cardAccountIds.has(t.account_id)) totals.card += amt;
-            else totals.other += amt;
-        });
-        return [
-            { name: "Tarjeta", value: Math.round(totals.card), color: "hsl(199, 89%, 48%)" },
-            { name: "Otros medios", value: Math.round(totals.other), color: "hsl(160, 84%, 28%)" },
-        ].filter((d) => d.value > 0);
-    }, [filteredTransactions, cardAccountIds, convert, displayCurrency]);
+        return getPaymentMethodData(filteredTransactions, accounts, convert);
+    }, [filteredTransactions, accounts, convert]);
 
     const topDescriptions = useMemo(() => {
         const map = {};

@@ -11,7 +11,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import PageHeader from "@/components/shared/PageHeader";
-import { formatCurrencyCode, getReportingDate, isRegularExpense, isRegularIncome } from "@/lib/formatters";
+import { formatCurrencyCode } from "@/lib/formatters";
+import {
+    getBudgetProgress,
+    getChildCategoryCount,
+    getMonthBudgets,
+    splitBudgetsByType,
+    sumConvertedBudgetAmounts,
+    sumConvertedBudgetProgress,
+} from "@/domain/budgets";
 import { useCurrency } from "@/lib/currency-context";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
@@ -43,35 +51,15 @@ export default function Budgets() {
     const { data: statements = [] } = useQuery({ queryKey: ["credit_card_statements"], queryFn: () => base44.entities.CreditCardStatement.list() });
     const { data: categories = [] } = useQuery({ queryKey: ["categories"], queryFn: () => base44.entities.Category.list() });
 
-    // Budgets for current month (month matches OR budget has no month = template)
-    const budgets = allBudgets.filter((b) => b.month === monthKey);
-
-    // Collect all category IDs that match the budget (parent + all its children)
-    const getMatchingCategoryIds = (budget) => {
-        if (!budget.category_id) return null;
-        const ids = new Set([budget.category_id]);
-        categories.forEach((c) => { if (c.parent_category === budget.category_id) ids.add(c.id); });
-        return ids;
+    const budgets = getMonthBudgets(allBudgets, monthKey);
+    const budgetProgressOptions = {
+        categories,
+        from: monthStart,
+        to: monthEnd,
+        includeFuture: true,
+        context: { accounts, statements },
     };
-
-    // Calculate actual amount for a budget (spent for expense budgets, received for income budgets)
-    const getBudgetProgress = (budget) => {
-        const cat = categories.find((c) => c.id === budget.category_id);
-        const isIncome = cat?.type === "income";
-        const matchIds = getMatchingCategoryIds(budget);
-        return transactions
-            .filter((tx) => {
-                if (isIncome ? !isRegularIncome(tx) : !isRegularExpense(tx)) return false;
-                const reportingDate = getReportingDate(tx, { accounts, statements });
-                if (!reportingDate) return false;
-                if (reportingDate < monthStart || reportingDate > monthEnd) return false;
-                if (tx.status === "projected") return false;
-                if (matchIds && tx.category_id && matchIds.has(tx.category_id)) return true;
-                if (!matchIds && budget.category_name && tx.category_name === budget.category_name) return true;
-                return false;
-            })
-            .reduce((s, tx) => s + (tx.amount || 0), 0);
-    };
+    const getProgress = (budget) => getBudgetProgress(budget, transactions, budgetProgressOptions);
 
     const createMut = useMutation({
         mutationFn: (d) => base44.entities.Budget.create(d),
@@ -99,10 +87,9 @@ export default function Budgets() {
         toast.success(`${prevBudgets.length} presupuestos copiados`);
     };
 
-    const expBudgets = budgets.filter((b) => categories.find((c) => c.id === b.category_id)?.type !== "income");
-    const incBudgets = budgets.filter((b) => categories.find((c) => c.id === b.category_id)?.type === "income");
-    const totalBudget = expBudgets.reduce((s, b) => s + convert(b.amount || 0, b.currency || "ARS"), 0);
-    const totalSpent = expBudgets.reduce((s, b) => s + convert(getBudgetProgress(b), b.currency || "ARS"), 0);
+    const { expenseBudgets: expBudgets, incomeBudgets: incBudgets } = splitBudgetsByType(budgets, categories);
+    const totalBudget = sumConvertedBudgetAmounts(expBudgets, convert);
+    const totalSpent = sumConvertedBudgetProgress(expBudgets, transactions, { ...budgetProgressOptions, convert });
     const isCurrentMonth = monthKey === toMonthKey(new Date());
 
     return (
@@ -184,7 +171,7 @@ export default function Budgets() {
                             )}
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                                 {expBudgets.map((b, i) => {
-                                    const progress = getBudgetProgress(b);
+                                    const progress = getProgress(b);
                                     const pct = b.amount > 0 ? Math.min((progress / b.amount) * 100, 100) : 0;
                                     const over = progress > b.amount;
                                     const remaining = b.amount - progress;
@@ -196,7 +183,7 @@ export default function Budgets() {
                                                         <div className="min-w-0">
                                                             <p className="font-semibold truncate">{b.category_name}</p>
                                                             {b.category_id && (() => {
-                                                                const childCount = categories.filter((c) => c.parent_category === b.category_id).length;
+                                                                const childCount = getChildCategoryCount(b, categories);
                                                                 return childCount > 0
                                                                     ? <p className="text-xs text-muted-foreground">incluye {childCount} subcategoría{childCount > 1 ? "s" : ""}</p>
                                                                     : null;
@@ -228,7 +215,7 @@ export default function Budgets() {
                             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Ingresos esperados</p>
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                                 {incBudgets.map((b, i) => {
-                                    const received = getBudgetProgress(b);
+                                    const received = getProgress(b);
                                     const pct = b.amount > 0 ? Math.min((received / b.amount) * 100, 100) : 0;
                                     const reached = received >= b.amount;
                                     const remaining = b.amount - received;
