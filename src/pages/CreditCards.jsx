@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useEffect, useMemo, useState } from "react";
 import { base44 } from "@/api/base44Client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarDays, CheckCircle2, ChevronDown, CreditCard, Pencil, WalletCards } from "lucide-react";
@@ -31,7 +31,7 @@ export default function CreditCards() {
     const [selectedCardId, setSelectedCardId] = useState("");
 
     const { data: accounts = [] } = useQuery({ queryKey: ["accounts"], queryFn: () => base44.entities.Account.list() });
-    const { data: transactions = [] } = useQuery({ queryKey: ["transactions"], queryFn: () => base44.entities.Transaction.list("-date", 5000) });
+    const { data: transactions = [] } = useQuery({ queryKey: ["transactions"], queryFn: () => base44.entities.Transaction.list("-date") });
     const { data: statements = [] } = useQuery({
         queryKey: ["credit_card_statements"],
         queryFn: () => base44.entities.CreditCardStatement.list("-period_end", 1000),
@@ -90,7 +90,7 @@ export default function CreditCards() {
             const payment = await base44.entities.Transaction.create({
                 type: "transfer",
                 status: "confirmed",
-                date: statement.due_date || TODAY,
+                date: TODAY,
                 amount: statement.total_amount,
                 currency: paymentAccount.currency || statement.currency || "ARS",
                 to_amount: (paymentAccount.currency || statement.currency || "ARS") === (statement.currency || "ARS") ? null : statement.total_amount,

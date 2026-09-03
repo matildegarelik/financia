@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+﻿import React, { useState, useEffect } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -67,7 +67,7 @@ export default function Settings() {
     });
     const { data: transactions = [] } = useQuery({
         queryKey: ["transactions"],
-        queryFn: () => base44.entities.Transaction.list("-date", 500),
+        queryFn: () => base44.entities.Transaction.list("-date"),
     });
 
     const computeEffective = (acc) => computeAccountBalance(acc, transactions);

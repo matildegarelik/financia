@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+﻿import React, { useMemo, useState } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery } from "@tanstack/react-query";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell } from "recharts";
@@ -79,7 +79,7 @@ export default function Analytics() {
 
     const { data: transactions = [], isLoading } = useQuery({
         queryKey: ["transactions"],
-        queryFn: () => base44.entities.Transaction.list("-date", 1000),
+        queryFn: () => base44.entities.Transaction.list("-date"),
     });
     const { data: categories = [] } = useQuery({
         queryKey: ["categories"],

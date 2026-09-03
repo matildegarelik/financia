@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+﻿import React, { useMemo, useState } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, Link } from "react-router-dom";
@@ -13,7 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import CurrencySelector from "@/components/shared/CurrencySelector";
 import SpendingChart from "@/components/dashboard/SpendingChart";
 import { formatCurrencyCode, formatDate, getCurrentMonth, TODAY, getTransferDestinationAmount } from "@/lib/formatters";
-import { computeAccountBalance } from "@/domain/transactions";
+import { computeAccountBalance, computeTotalSavings } from "@/domain/transactions";
 import { getBudgetProgress, getMonthBudgets, splitBudgetsByType } from "@/domain/budgets";
 import { filterReportTransactions, sumIncomeExpense } from "@/domain/reporting";
 import { useCurrency } from "@/lib/currency-context";
@@ -33,7 +33,7 @@ export default function Dashboard() {
 
     const { data: transactions = [], isLoading: loadingTx } = useQuery({
         queryKey: ["transactions"],
-        queryFn: () => base44.entities.Transaction.list("-date", 500),
+        queryFn: () => base44.entities.Transaction.list("-date"),
     });
     const { data: accounts = [], isLoading: loadingAcc } = useQuery({
         queryKey: ["accounts"],
@@ -79,18 +79,11 @@ export default function Dashboard() {
 
     const computeEffective = (acc) => computeAccountBalance(acc, transactions);
 
-    const liquidAccounts = accounts.filter((a) => a.type !== "investment");
-    const liquidBalance = useMemo(() =>
-        liquidAccounts.reduce((s, a) => s + convert(computeEffective(a), a.currency || "ARS"), 0),
-        [accounts, transactions, convert]);
-
-    const investedTotal = useMemo(() =>
-        investments
-            .filter((i) => !i.status || i.status === "activa")
-            .reduce((s, i) => s + convert(i.current_value || i.amount_invested || 0, i.currency || "ARS"), 0),
-        [investments, convert]);
-
-    const totalSavings = liquidBalance + investedTotal;
+    // Totales centralizados
+    const { liquidBalance, investedTotal, totalSavings } = useMemo(
+        () => computeTotalSavings(accounts, investments, transactions, convert),
+        [accounts, investments, transactions, convert]
+    );
 
     const recentTx = useMemo(() =>
         transactions

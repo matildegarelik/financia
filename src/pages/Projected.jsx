@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+﻿import React, { useState, useMemo } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, ChevronLeft, ChevronRight, ChevronDown, CloudLightning, Trash2, RefreshCw } from "lucide-react";
@@ -10,7 +10,7 @@ import PageHeader from "@/components/shared/PageHeader";
 import CurrencySelector from "@/components/shared/CurrencySelector";
 import TransactionFormProjected from "@/components/transactions/TransactionFormProjected";
 import { formatCurrencyCode, formatDate, getCurrentMonth, getMonthLabel, getReportingDate, isRegularExpense, isRegularIncome, getTransferDifference, affectsReports } from "@/lib/formatters";
-import { computeAccountBalance } from "@/domain/transactions";
+import { computeAccountBalance, computeTotalSavings } from "@/domain/transactions";
 import { cn } from "@/lib/utils";
 import { useCurrency } from "@/lib/currency-context";
 import { toast } from "sonner";
@@ -50,7 +50,7 @@ export default function Projected() {
 
     const { data: transactions = [], isLoading } = useQuery({
         queryKey: ["transactions"],
-        queryFn: () => base44.entities.Transaction.list("-date", 500),
+        queryFn: () => base44.entities.Transaction.list("-date"),
     });
     const { data: accounts = [] } = useQuery({ queryKey: ["accounts"], queryFn: () => base44.entities.Account.list() });
     const { data: statements = [] } = useQuery({ queryKey: ["credit_card_statements"], queryFn: () => base44.entities.CreditCardStatement.list() });
@@ -96,22 +96,11 @@ export default function Projected() {
     const togglePast = (key) => setPastExpanded((p) => ({ ...p, [key]: !p[key] }));
     const [budgetExpanded, setBudgetExpanded] = useState(false);
 
-    // Balance total actual (cuentas líquidas + inversiones activas)
-    const currentLiquidBalance = useMemo(() => {
-        const liquidAccts = accounts.filter((a) => a.type !== "investment");
-        return liquidAccts.reduce((sum, acc) => {
-            const eff = computeAccountBalance(acc, transactions);
-            return sum + convert(eff, acc.currency || "ARS");
-        }, 0);
-    }, [accounts, transactions, convert]);
-
-    const investedTotal = useMemo(() =>
-        investments
-            .filter((i) => !i.status || i.status === "activa")
-            .reduce((s, i) => s + convert(i.current_value || i.amount_invested || 0, i.currency || "ARS"), 0),
-        [investments, convert]);
-
-    const currentTotalSavings = currentLiquidBalance + investedTotal;
+    // Totales centralizados
+    const { liquidBalance: currentLiquidBalance, investedTotal, totalSavings: currentTotalSavings } = useMemo(
+        () => computeTotalSavings(accounts, investments, transactions, convert),
+        [accounts, investments, transactions, convert]
+    );
 
     // Balance acumulado al final de un mes dado (base = total: líquido + invertido)
     function getBalanceAtMonth(targetMonth) {

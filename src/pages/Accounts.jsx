@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, Wallet, CreditCard, Banknote, PiggyBank, MoreHorizontal, Trash2, Pencil, Lock, Bitcoin, Star, ChevronUp, ChevronDown, GripVertical, Info, Eye, EyeOff } from "lucide-react";
@@ -14,7 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import PageHeader from "@/components/shared/PageHeader";
 import CurrencySelector from "@/components/shared/CurrencySelector";
 import { formatCurrency, formatCurrencyCode, ACCOUNT_TYPES } from "@/lib/formatters";
-import { computeAccountBalance } from "@/domain/transactions";
+import { computeAccountBalance, computeTotalSavings } from "@/domain/transactions";
 import { useCurrency } from "@/lib/currency-context";
 import { cn } from "@/lib/utils";
 
@@ -39,7 +39,7 @@ export default function Accounts() {
     });
     const { data: transactions = [] } = useQuery({
         queryKey: ["transactions"],
-        queryFn: () => base44.entities.Transaction.list("-date", 5000),
+        queryFn: () => base44.entities.Transaction.list("-date"),
     });
 
     const computeEffectiveBalance = (acc) => computeAccountBalance(acc, transactions);
@@ -161,21 +161,28 @@ export default function Accounts() {
         dragArmedId.current = acc.id;
     };
 
-    // Balance by currency (liquid only), using computed effective balance
-    const liquidAccounts = accounts.filter((a) => a.type !== "investment");
-    const byCurrency = liquidAccounts.reduce((acc, a) => {
-        const c = a.currency || "ARS";
-        acc[c] = (acc[c] || 0) + computeEffectiveBalance(a);
-        return acc;
-    }, {});
+    // Totales centralizados: usa computeTotalSavings para no doble-contar inversiones
+    const { liquidBalance: totalInDisplayCurrency, investedTotal } = useMemo(
+        () => computeTotalSavings(accounts, investments, transactions, convert),
+        [accounts, investments, transactions, convert]
+    );
 
-    const totalInDisplayCurrency = liquidAccounts.reduce(
-        (s, a) => s + convert(computeEffectiveBalance(a), a.currency || "ARS"), 0
-    );
-    const activeInvestments = investments.filter((i) => !i.status || i.status === "activa");
-    const investedTotal = activeInvestments.reduce(
-        (s, i) => s + convert(i.current_value || i.amount_invested || 0, i.currency || "ARS"), 0
-    );
+    // Desglose por moneda para los badges de "Total disponible"
+    const byCurrency = useMemo(() => {
+        const activeInvAccountIds = new Set(
+            (investments || [])
+                .filter((i) => !i.status || i.status === "activa")
+                .map((i) => i.account_id)
+                .filter((id) => !!id && accounts.find((a) => a.id === id)?.type === "investment")
+        );
+        return accounts
+            .filter((a) => !(a.type === "investment" && activeInvAccountIds.has(a.id)))
+            .reduce((map, a) => {
+                const c = a.currency || "ARS";
+                map[c] = (map[c] || 0) + computeEffectiveBalance(a);
+                return map;
+            }, {});
+    }, [accounts, investments, transactions]);
 
     return (
         <div className="space-y-5">

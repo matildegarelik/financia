@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+﻿import React, { useState, useEffect, useMemo } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { Plus, Search, Trash2, Upload, ChevronDown, ChevronUp, Briefcase, Filter, Star, SlidersHorizontal, X, ChevronLeft, ChevronRight } from "lucide-react";
@@ -83,7 +83,7 @@ export default function Transactions() {
     // All transactions — for balance computation and installment lookups
     const { data: allTx = [] } = useQuery({
         queryKey: ["transactions"],
-        queryFn: () => base44.entities.Transaction.list("-date", 5000),
+        queryFn: () => base44.entities.Transaction.list("-date"),
         staleTime: 30000,
     });
     const { data: accounts = [] } = useQuery({ queryKey: ["accounts"], queryFn: () => base44.entities.Account.list() });
