@@ -252,6 +252,9 @@ export function getTransferDestinationAmount(tx, destinationCurrency) {
 
 export function getTransferDifference(tx, convert = (amount) => amount) {
     if (!tx || tx.type !== "transfer") return 0;
+    if (tx.exchange_difference != null && tx.exchange_difference_currency) {
+        return convert(Number(tx.exchange_difference) || 0, tx.exchange_difference_currency);
+    }
 
     const sourceCurrency = tx.currency || "ARS";
     const destinationCurrency = tx.to_currency || sourceCurrency;

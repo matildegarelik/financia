@@ -10,6 +10,7 @@ import { ChevronDown } from "lucide-react";
 import { useCurrency } from "@/lib/currency-context";
 import { Checkbox } from "@/components/ui/checkbox";
 import { getReportingMode } from "@/lib/formatters";
+import { calculateTransferExchangeSnapshot, TRANSFER_CALCULATION_MODES } from "@/lib/transferExchange";
 
 function makeGroupId() {
     if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
@@ -17,7 +18,7 @@ function makeGroupId() {
 }
 
 export default function TransactionForm({ open, onClose, onSubmit, accounts = [], categories = [], initial }) {
-    const { activeCurrencies } = useCurrency();
+    const { activeCurrencies, rates } = useCurrency();
     const [form, setForm] = useState(() => getDefault(initial));
     const [showExtra, setShowExtra] = useState(false);
     useEffect(() => { setForm(getDefault(initial)); setShowExtra(false); }, [initial, open]);
@@ -34,6 +35,8 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
             amount: "",
             amount_gross: "",
             to_amount: "",
+            transfer_calculation_mode: "amounts_neutral",
+            exchange_rate: "",
             currency: defaultAcc?.currency || activeCurrencies[0] || "ARS",
             description: "",
             category_id: "",
@@ -58,6 +61,8 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
                 amount: String(init.amount || ""),
                 amount_gross: String(init.amount_gross || ""),
                 to_amount: String(init.to_amount || ""),
+                exchange_rate: String(init.exchange_rate || ""),
+                transfer_calculation_mode: init.transfer_calculation_mode || (init.exchange_difference_currency ? "rate" : "legacy"),
                 reporting_mode: getReportingMode(init),
             } : {}),
         };
@@ -74,6 +79,9 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
         } else {
             set("to_account_id", accId);
             set("to_account_name", acc?.name || "");
+            if (acc?.currency && form.currency && acc.currency !== form.currency) {
+                set("exchange_rate", rates[`${form.currency}_${acc.currency}`] || "");
+            }
         }
     };
 
@@ -90,8 +98,26 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
         const destinationAccount = accounts.find((a) => a.id === form.to_account_id);
         const sourceAccount = accounts.find((a) => a.id === form.account_id);
         const destinationCurrency = destinationAccount?.currency || form.currency;
-        const destinationAmount = parseFloat(form.to_amount);
         const isCrossCurrencyTransfer = form.type === "transfer" && destinationCurrency !== form.currency;
+        const isLegacyTransfer = isCrossCurrencyTransfer && form.transfer_calculation_mode === "legacy";
+        const referenceRate = isCrossCurrencyTransfer ? Number(rates[`${form.currency}_${destinationCurrency}`]) || null : null;
+        const enteredRate = parseFloat(form.exchange_rate);
+        const effectiveToAmount = isCrossCurrencyTransfer && form.transfer_calculation_mode === TRANSFER_CALCULATION_MODES.RATE && net > 0 && enteredRate > 0
+            ? net * enteredRate
+            : parseFloat(form.to_amount);
+        const exchangeSnapshot = isLegacyTransfer
+            ? {}
+            : calculateTransferExchangeSnapshot({
+                amount: net,
+                currency: form.currency,
+                toAmount: effectiveToAmount,
+                toCurrency: destinationCurrency,
+                mode: isCrossCurrencyTransfer
+                    ? (form.transfer_calculation_mode || TRANSFER_CALCULATION_MODES.AMOUNTS_NEUTRAL)
+                    : TRANSFER_CALCULATION_MODES.AMOUNTS_NEUTRAL,
+                referenceRate,
+                date: form.date,
+            });
         const installmentTotal = form.installment_total ? parseInt(form.installment_total) : null;
         const isCreditCardInstallment = sourceAccount?.type === "credit_card" && form.type === "expense" && installmentTotal > 1;
         onSubmit({
@@ -99,8 +125,15 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
             status: isCreditCardInstallment ? "installment" : form.status,
             amount: net,
             amount_gross: !isNaN(gross) && gross !== net ? gross : null,
-            to_amount: isCrossCurrencyTransfer ? (!isNaN(destinationAmount) ? destinationAmount : null) : null,
+            to_amount: isCrossCurrencyTransfer ? (!isNaN(effectiveToAmount) ? effectiveToAmount : null) : null,
             to_currency: isCrossCurrencyTransfer ? destinationCurrency : null,
+            ...exchangeSnapshot,
+            transfer_calculation_mode: isLegacyTransfer ? null : exchangeSnapshot.transfer_calculation_mode,
+            exchange_rate: isLegacyTransfer ? (initial?.exchange_rate ?? null) : exchangeSnapshot.exchange_rate,
+            reference_rate: isLegacyTransfer ? (initial?.reference_rate ?? null) : exchangeSnapshot.reference_rate,
+            exchange_difference: isLegacyTransfer ? (initial?.exchange_difference ?? null) : exchangeSnapshot.exchange_difference,
+            exchange_difference_currency: isLegacyTransfer ? (initial?.exchange_difference_currency ?? null) : exchangeSnapshot.exchange_difference_currency,
+            exchange_rate_date: isLegacyTransfer ? (initial?.exchange_rate_date ?? null) : exchangeSnapshot.exchange_rate_date,
             is_recurring: isCreditCardInstallment ? true : form.is_recurring,
             recurring_frequency: isCreditCardInstallment ? "monthly" : form.recurring_frequency,
             installment_total: installmentTotal,
@@ -203,7 +236,13 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
                         <div className="col-span-2">
                             <Label>Monto neto</Label>
                             <Input type="number" step="0.01" placeholder="0.00" value={form.amount}
-                                onChange={(e) => set("amount", e.target.value)} required />
+                                onChange={(e) => {
+                                    const value = e.target.value;
+                                    set("amount", value);
+                                    if (isCrossCurrencyTransfer && form.transfer_calculation_mode === "rate" && Number(form.exchange_rate) > 0) {
+                                        set("to_amount", String((Number(value || 0) * Number(form.exchange_rate)).toFixed(2)));
+                                    }
+                                }} required />
                         </div>
                         <div className="h-9 flex items-center justify-center rounded-md border border-input bg-muted/40 px-3 text-sm font-mono font-semibold text-muted-foreground">
                             {form.currency || "—"}
@@ -244,14 +283,53 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
                             </div>
 
                             {isCrossCurrencyTransfer && (
-                                <div className="grid grid-cols-3 gap-2 items-end">
-                                    <div className="col-span-2">
-                                        <Label>Monto recibido</Label>
-                                        <Input type="number" step="0.01" placeholder="0.00" value={form.to_amount}
-                                            onChange={(e) => set("to_amount", e.target.value)} required />
+                                <div className="space-y-3 rounded-lg border border-border/60 bg-muted/20 p-3">
+                                    <div>
+                                        <Label className="text-xs">Conversión</Label>
+                                        <div className="grid grid-cols-2 gap-2 mt-1.5">
+                                            <Button type="button" size="sm"
+                                                variant={form.transfer_calculation_mode === "rate" ? "default" : "outline"}
+                                                onClick={() => {
+                                                    const rate = Number(form.exchange_rate) || Number(rates[`${form.currency}_${destinationCurrency}`]) || 0;
+                                                    setForm((p) => ({
+                                                        ...p,
+                                                        transfer_calculation_mode: "rate",
+                                                        exchange_rate: rate ? String(rate) : "",
+                                                        to_amount: rate && Number(p.amount) ? String((Number(p.amount) * rate).toFixed(2)) : p.to_amount,
+                                                    }));
+                                                }}>
+                                                Usar tasa
+                                            </Button>
+                                            <Button type="button" size="sm"
+                                                variant={form.transfer_calculation_mode === "amounts_neutral" ? "default" : "outline"}
+                                                onClick={() => set("transfer_calculation_mode", "amounts_neutral")}>
+                                                Montos sin ganancia
+                                            </Button>
+                                        </div>
                                     </div>
-                                    <div className="h-9 flex items-center justify-center rounded-md border border-input bg-muted/40 px-3 text-sm font-mono font-semibold text-muted-foreground">
-                                        {destinationCurrency}
+                                    {form.transfer_calculation_mode === "rate" && (
+                                        <div>
+                                            <Label className="text-xs">Tasa efectiva ({destinationCurrency} por {form.currency})</Label>
+                                            <Input type="number" step="0.00000001" min="0" value={form.exchange_rate}
+                                                onChange={(e) => {
+                                                    const rate = e.target.value;
+                                                    setForm((p) => ({
+                                                        ...p,
+                                                        exchange_rate: rate,
+                                                        to_amount: Number(rate) > 0 && Number(p.amount) ? String((Number(p.amount) * Number(rate)).toFixed(2)) : p.to_amount,
+                                                    }));
+                                                }} required />
+                                        </div>
+                                    )}
+                                    <div className="grid grid-cols-3 gap-2 items-end">
+                                        <div className="col-span-2">
+                                            <Label>Monto recibido</Label>
+                                            <Input type="number" step="0.01" placeholder="0.00" value={form.to_amount}
+                                                onChange={(e) => set("to_amount", e.target.value)} required />
+                                        </div>
+                                        <div className="h-9 flex items-center justify-center rounded-md border border-input bg-muted/40 px-3 text-sm font-mono font-semibold text-muted-foreground">
+                                            {destinationCurrency}
+                                        </div>
                                     </div>
                                 </div>
                             )}

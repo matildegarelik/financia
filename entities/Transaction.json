@@ -108,6 +108,25 @@
             "type": "boolean",
             "default": false
         },
+        "transfer_calculation_mode": {
+            "type": "string",
+            "enum": ["amounts_neutral", "rate"]
+        },
+        "exchange_rate": {
+            "type": "number"
+        },
+        "reference_rate": {
+            "type": "number"
+        },
+        "exchange_difference": {
+            "type": "number"
+        },
+        "exchange_difference_currency": {
+            "type": "string"
+        },
+        "exchange_rate_date": {
+            "type": "string"
+        },
         "reporting_mode": {
             "type": "string",
             "enum": [

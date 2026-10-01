@@ -41,6 +41,10 @@ export default function Sidebar() {
     const [moreOpen, setMoreOpen] = useState(false);
     const favPaths = loadFavPaths();
     const favItems = navItems.filter((n) => favPaths.includes(n.path));
+    const mobileFavItems = favItems
+        .filter((item) => item.path !== "/accounts" && item.path !== "/credit-cards")
+        .concat(navItems.find((item) => item.path === "/credit-cards") || [])
+        .slice(0, 5);
 
     const NavContent = () => (
         <div className="flex flex-col h-full">
@@ -114,7 +118,7 @@ export default function Sidebar() {
             {/* Mobile bottom nav */}
             <nav className="fixed bottom-0 left-0 right-0 bg-sidebar border-t border-sidebar-border z-40 lg:hidden shadow-[0_-12px_30px_rgba(0,0,0,0.28)]" style={{ paddingBottom: '15px' }}>
                 <div className="flex items-center px-1.5 pt-1.5">
-                    {favItems.slice(0, 5).map((item) => {
+                    {mobileFavItems.map((item) => {
                         const isActive = location.pathname === item.path;
                         return (
                             <Link key={item.path} to={item.path}

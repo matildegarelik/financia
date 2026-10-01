@@ -292,7 +292,6 @@ function StatementMonthRow({ label, statement, transactions, card, accounts, onE
         [transactions, statement]
     );
     const isPastDue = statement.total_amount > 0 && statement.due_date < TODAY;
-    const hasCustomDates = Boolean(statement.id);
     const paymentAccount = accounts.find((account) => account.id === (statement.payment_account_id || card.default_payment_account_id));
     const paymentBalance = paymentAccount ? computeAccountBalance(paymentAccount, transactions) : null;
     const sameCurrency = paymentAccount && (paymentAccount.currency || "ARS") === (statement.currency || "ARS");
@@ -304,10 +303,9 @@ function StatementMonthRow({ label, statement, transactions, card, accounts, onE
         <div className={cn("rounded-lg border p-3 space-y-3", isPastDue ? "border-destructive/40 bg-destructive/5" : "border-border/60")}>
             <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                         <Badge variant="outline" className="text-xs">{label}</Badge>
                         <p className="text-sm font-semibold">{monthKey}</p>
-                        {hasCustomDates && <Badge variant="secondary" className="text-xs">fechas guardadas</Badge>}
                     </div>
                     <p className="text-xs text-muted-foreground">
                         Cierra {formatDate(statement.close_date)} · vence {formatDate(statement.due_date)}

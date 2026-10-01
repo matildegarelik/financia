@@ -215,6 +215,7 @@ export default function Projected() {
         .map((tx) => ({ tx, difference: getTransferDifference(tx, convert) }))
         .filter(({ difference }) => Math.abs(difference) > 0.005),
     [transactions, selectedMonth, accounts, statements, convert]);
+    const transferDifferenceTotal = transferDifferences.reduce((sum, item) => sum + item.difference, 0);
 
     const yearMonths = useMemo(() => Array.from({ length: 12 }, (_, i) => {
         const m = String(i + 1).padStart(2, "0");
@@ -658,40 +659,50 @@ export default function Projected() {
 
                     {transferDifferences.length > 0 && (
                         <div>
-                            <button
-                                type="button"
-                                className="flex w-full items-center justify-between gap-3 mb-2 text-left"
-                                onClick={() => setTransferExpanded((expanded) => !expanded)}
-                            >
-                                <span className="flex items-center gap-1.5 text-sm font-semibold text-muted-foreground">
-                                    <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", transferExpanded && "rotate-180")} />
-                                    Diferencias de transferencias
-                                </span>
-                                <span className="text-sm font-semibold text-destructive">
-                                    {formatCurrencyCode(transferDifferences.reduce((sum, item) => sum + item.difference, 0), displayCurrency)}
-                                </span>
-                            </button>
-                            {transferExpanded && <Card className="overflow-hidden border-amber-500/30">
-                                <div className="divide-y divide-border">
-                                    {transferDifferences.map(({ tx, difference }) => {
-                                        const destinationCurrency = tx.to_currency || tx.currency || "ARS";
-                                        const destinationAmount = getTransferDestinationAmount(tx, destinationCurrency);
-                                        return (
-                                            <div key={tx.id} className="flex items-center justify-between gap-3 p-3">
-                                                <div className="min-w-0">
-                                                    <p className="text-sm font-medium truncate">{tx.description || "Transferencia"}</p>
-                                                    <p className="text-xs text-muted-foreground truncate">
-                                                        {formatCurrencyCode(tx.amount, tx.currency || "ARS")} → {formatCurrencyCode(destinationAmount, destinationCurrency)}
-                                                    </p>
+                            <div className="flex items-center justify-between mb-2">
+                                <h3 className="text-sm font-semibold text-muted-foreground">Diferencias de transferencias</h3>
+                                <Button variant="ghost" size="sm" className="h-6 text-xs px-2"
+                                    onClick={() => setTransferExpanded((expanded) => !expanded)}>
+                                    <ChevronDown className={cn("h-3 w-3 mr-1 transition-transform", transferExpanded && "rotate-180")} />
+                                    {transferExpanded ? "Ocultar" : "Ver detalle"}
+                                </Button>
+                            </div>
+                            {transferExpanded ? (
+                                <Card className="overflow-hidden">
+                                    <div className="divide-y divide-border">
+                                        {transferDifferences.map(({ tx, difference }) => {
+                                            const destinationCurrency = tx.to_currency || tx.currency || "ARS";
+                                            const destinationAmount = getTransferDestinationAmount(tx, destinationCurrency);
+                                            return (
+                                                <div key={tx.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+                                                    <div className="min-w-0">
+                                                        <p className="text-muted-foreground truncate">{tx.description || "Transferencia"}</p>
+                                                        <p className="text-xs text-muted-foreground truncate">
+                                                            {formatCurrencyCode(tx.amount, tx.currency || "ARS")} → {formatCurrencyCode(destinationAmount, destinationCurrency)}
+                                                        </p>
+                                                    </div>
+                                                    <span className={cn("font-medium shrink-0", difference < 0 ? "text-destructive" : "text-primary")}>
+                                                        {difference >= 0 ? "+" : ""}{formatCurrencyCode(difference, displayCurrency)}
+                                                    </span>
                                                 </div>
-                                                <span className={cn("text-sm font-semibold shrink-0", difference < 0 ? "text-destructive" : "text-primary")}>
-                                                    {difference >= 0 ? "+" : ""}{formatCurrencyCode(difference, displayCurrency)}
-                                                </span>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            </Card>}
+                                            );
+                                        })}
+                                    </div>
+                                </Card>
+                            ) : (
+                                <Card>
+                                    <CardContent className="p-3 flex flex-wrap gap-x-5 gap-y-1 text-sm items-center">
+                                        <span className="text-muted-foreground">
+                                            Total de transferencias: <span className={cn("font-medium", transferDifferenceTotal < 0 ? "text-destructive" : "text-primary")}>
+                                                {formatCurrencyCode(transferDifferenceTotal, displayCurrency)}
+                                            </span>
+                                        </span>
+                                        <span className="text-xs text-muted-foreground/60 ml-auto">
+                                            {transferDifferences.length} con diferencia
+                                        </span>
+                                    </CardContent>
+                                </Card>
+                            )}
                         </div>
                     )}
                 </div>
