@@ -2,6 +2,7 @@
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, ChevronLeft, ChevronRight, ChevronDown, CloudLightning, Trash2, RefreshCw } from "lucide-react";
+import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -9,8 +10,9 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import PageHeader from "@/components/shared/PageHeader";
 import CurrencySelector from "@/components/shared/CurrencySelector";
 import TransactionFormProjected from "@/components/transactions/TransactionFormProjected";
-import { formatCurrencyCode, formatDate, getCurrentMonth, getMonthLabel, getReportingDate, isRegularExpense, isRegularIncome, getTransferDifference, affectsReports } from "@/lib/formatters";
+import { formatCurrencyCode, formatDate, getCurrentMonth, getMonthLabel, getReportingDate, getTransferDestinationAmount, isRegularExpense, isRegularIncome, getTransferDifference, affectsReports } from "@/lib/formatters";
 import { computeAccountBalance, computeTotalSavings } from "@/domain/transactions";
+import { getUnplannedExpenses } from "@/domain/budgets";
 import { cn } from "@/lib/utils";
 import { useCurrency } from "@/lib/currency-context";
 import { toast } from "sonner";
@@ -95,6 +97,7 @@ export default function Projected() {
     const [pastExpanded, setPastExpanded] = useState({});
     const togglePast = (key) => setPastExpanded((p) => ({ ...p, [key]: !p[key] }));
     const [budgetExpanded, setBudgetExpanded] = useState(false);
+    const [transferExpanded, setTransferExpanded] = useState(false);
 
     // Totales centralizados
     const { liquidBalance: currentLiquidBalance, investedTotal, totalSavings: currentTotalSavings } = useMemo(
@@ -156,7 +159,8 @@ export default function Projected() {
         const projIncome = budgetIncome + projIncomeTxs.reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0);
         const projExpense = budgetExpense + projExpenseTxs.reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0);
         const realIncome = realIncomeTxs.reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0) + Math.max(realTransferDiff, 0);
-        const realExpense = realExpenseTxs.reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0) + Math.max(-realTransferDiff, 0);
+        const realTransferExpense = Math.max(-realTransferDiff, 0);
+        const realExpense = realExpenseTxs.reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0) + realTransferExpense;
 
         // Desglose por moneda: mezclar presupuestos + one-offs
         const projIncomeByC = { ...byCurrency(incomeBudgets) };
@@ -168,6 +172,7 @@ export default function Projected() {
             projected, real,
             projIncome, projExpense, projSavings: projIncome - projExpense,
             realIncome, realExpense, realSavings: realIncome - realExpense,
+            realTransferExpense,
             projIncomeByC, projExpenseByC,
             realIncomeByC: byCurrency(realIncomeTxs),
             realExpenseByC: byCurrency(realExpenseTxs),
@@ -176,12 +181,40 @@ export default function Projected() {
     }
 
     const monthData = useMemo(() => computeMonth(selectedMonth), [transactions, selectedMonth, convert, budgets, categories, accounts, statements]);
-    const { projected, projIncome, projExpense, projSavings, realIncome, realExpense, realSavings,
+    const { projected, projIncome, projExpense, projSavings, realIncome, realExpense, realSavings, realTransferExpense,
         projIncomeByC, projExpenseByC, realIncomeByC, realExpenseByC, incomeBudgets, expenseBudgets } = monthData;
 
     const diffIncome = realIncome - projIncome;
     const diffExpense = realExpense - projExpense;
     const diffSavings = realSavings - projSavings;
+
+    const monthRange = useMemo(() => {
+        const [year, month] = selectedMonth.split("-").map(Number);
+        const lastDay = new Date(year, month, 0).getDate();
+        return { from: `${selectedMonth}-01`, to: `${selectedMonth}-${String(lastDay).padStart(2, "0")}` };
+    }, [selectedMonth]);
+    const unplannedExpenses = useMemo(
+        () => getUnplannedExpenses(transactions, budgets.filter((budget) => budget.month === selectedMonth), {
+            categories,
+            ...monthRange,
+            context: { accounts, statements },
+        }),
+        [transactions, budgets, selectedMonth, categories, monthRange, accounts, statements]
+    );
+    const unplannedTotal = unplannedExpenses.reduce(
+        (sum, tx) => sum + convert(tx.amount || 0, tx.currency || "ARS"),
+        0
+    );
+    const transferDifferences = useMemo(() => transactions
+        .filter((tx) =>
+            tx.status !== "projected" &&
+            tx.type === "transfer" &&
+            affectsReports(tx) &&
+            txReportingMonth(tx, { accounts, statements }) === selectedMonth
+        )
+        .map((tx) => ({ tx, difference: getTransferDifference(tx, convert) }))
+        .filter(({ difference }) => Math.abs(difference) > 0.005),
+    [transactions, selectedMonth, accounts, statements, convert]);
 
     const yearMonths = useMemo(() => Array.from({ length: 12 }, (_, i) => {
         const m = String(i + 1).padStart(2, "0");
@@ -242,15 +275,18 @@ export default function Projected() {
         });
     }, [transactions, convert, budgets, categories, accounts, statements]);
 
-    function CurrencyLines({ byC, total, colorClass = "" }) {
+    function CurrencyLines({ byC, total, colorClass = "", extraLines = [], breakdownLabel = "" }) {
         const [expanded, setExpanded] = useState(false);
         const entries = Object.entries(byC).filter(([, v]) => v !== 0);
+        const convertedEntriesTotal = entries.reduce((sum, [currency, value]) =>
+            sum + convert(value, currency), 0
+        );
 
         if (entries.length === 0) {
             return <p className={cn("text-xs sm:text-sm font-semibold break-all", colorClass)}>{formatCurrencyCode(0, displayCurrency)}</p>;
         }
 
-        const needsExpansion = entries.length > 1 || entries[0][0] !== displayCurrency;
+        const needsExpansion = entries.length > 1 || entries[0][0] !== displayCurrency || extraLines.length > 0;
         if (!needsExpansion) {
             return <p className={cn("text-xs sm:text-sm font-semibold break-all", colorClass)}>{formatCurrencyCode(entries[0][1], entries[0][0])}</p>;
         }
@@ -263,8 +299,23 @@ export default function Projected() {
                 </button>
                 {expanded && (
                     <div className="mt-1 space-y-0.5">
-                        {entries.map(([c, v]) => (
-                            <p key={c} className="text-xs text-muted-foreground leading-tight break-all">{formatCurrencyCode(v, c)}</p>
+                        {breakdownLabel && (
+                            <p className="flex items-center justify-between gap-3 text-xs text-muted-foreground leading-tight break-all">
+                                <span>{breakdownLabel}</span>
+                                <span>{formatCurrencyCode(convertedEntriesTotal, displayCurrency)}</span>
+                            </p>
+                        )}
+                        {!breakdownLabel && entries.map(([c, v]) => (
+                            <p key={c} className="flex items-center justify-between gap-3 text-xs text-muted-foreground leading-tight break-all">
+                                <span>{c}</span>
+                                <span>{formatCurrencyCode(convert(v, c), displayCurrency)}</span>
+                            </p>
+                        ))}
+                        {extraLines.map((line) => (
+                            <p key={line.label} className="flex items-center justify-between gap-3 text-xs text-muted-foreground leading-tight break-all">
+                                <span>{line.label}</span>
+                                <span>{formatCurrencyCode(convert(line.value, line.currency || displayCurrency), displayCurrency)}</span>
+                            </p>
                         ))}
                     </div>
                 )}
@@ -380,15 +431,15 @@ export default function Projected() {
                         <div className="grid grid-cols-3 gap-2 sm:gap-3">
                             {[
                                 { key: "income", label: "Ingresos", byC: realIncomeByC, total: realIncome, projByC: projIncomeByC, projTotal: projIncome, diff: diffIncome, colorClass: "text-primary", diffGood: diffIncome >= 0 },
-                                { key: "expense", label: "Gastos", byC: realExpenseByC, total: realExpense, projByC: projExpenseByC, projTotal: projExpense, diff: diffExpense, colorClass: "text-destructive", diffGood: diffExpense <= 0 },
+                                { key: "expense", label: "Gastos", byC: realExpenseByC, total: realExpense, breakdownLabel: "Gastos", extraLines: realTransferExpense > 0 ? [{ label: "Diferencias de transferencias", value: realTransferExpense }] : [], projByC: projExpenseByC, projTotal: projExpense, diff: diffExpense, colorClass: "text-destructive", diffGood: diffExpense <= 0 },
                                 { key: "savings", label: "Ahorro", byC: null, total: realSavings, projTotal: projSavings, diff: diffSavings, colorClass: realSavings >= 0 ? "text-primary" : "text-destructive", diffGood: diffSavings >= 0 },
-                            ].map(({ key, label, byC, total, projByC, projTotal, diff, colorClass, diffGood }) => (
+                            ].map(({ key, label, byC, total, breakdownLabel, extraLines, projByC, projTotal, diff, colorClass, diffGood }) => (
                                 <Card key={key}>
                                     <CardContent className="p-2 sm:p-4 space-y-1.5 sm:space-y-2">
                                         <p className="text-[10px] sm:text-xs text-muted-foreground">{label}</p>
                                         {/* Real — número principal */}
                                         {byC
-                                            ? <CurrencyLines byC={byC} total={total} colorClass={colorClass} />
+                                             ? <CurrencyLines byC={byC} total={total} breakdownLabel={breakdownLabel} extraLines={extraLines} colorClass={colorClass} />
                                             : <p className={cn("text-xs sm:text-sm font-semibold break-all", colorClass)}>{formatCurrencyCode(total, displayCurrency)}</p>
                                         }
                                         {/* Proyectado + diff — siempre visible */}
@@ -396,7 +447,7 @@ export default function Projected() {
                                             <div className="pt-1.5 border-t border-border/40 space-y-0.5">
                                                 <p className="text-[10px] text-muted-foreground/70">Meta</p>
                                                 {projByC
-                                                    ? <CurrencyLines byC={projByC} total={projTotal} colorClass="text-muted-foreground" />
+                                                     ? <CurrencyLines byC={projByC} total={projTotal} breakdownLabel="Meta" colorClass="text-muted-foreground" />
                                                     : <p className="text-[11px] sm:text-xs text-muted-foreground font-medium break-all">{formatCurrencyCode(projTotal, displayCurrency)}</p>
                                                 }
                                                 {diff !== 0 && (
@@ -429,7 +480,7 @@ export default function Projected() {
                                 {realExpense > 0 && (
                                     <div className="mt-1.5 sm:mt-2 pt-1.5 sm:pt-2 border-t border-border/40 space-y-0.5">
                                         <p className="text-[10px] text-muted-foreground">Ya gastado</p>
-                                        <CurrencyLines byC={realExpenseByC} total={realExpense} colorClass="text-muted-foreground" />
+                                        <CurrencyLines byC={realExpenseByC} total={realExpense} breakdownLabel="Gastos" extraLines={realTransferExpense > 0 ? [{ label: "Diferencias de transferencias", value: realTransferExpense }] : []} colorClass="text-muted-foreground" />
                                     </div>
                                 )}
                             </CardContent></Card>
@@ -448,6 +499,41 @@ export default function Projected() {
                                 )}
                             </CardContent></Card>
                         </div>
+                    )}
+
+                    {false && transferDifferences.length > 0 && (
+                        <Card className="border-amber-500/30">
+                            <CardContent className="p-3 space-y-2">
+                                <div className="flex items-center justify-between gap-3">
+                                    <div>
+                                        <p className="text-sm font-semibold">Diferencias de transferencias</p>
+                                        <p className="text-xs text-muted-foreground">Impactan el total, pero no son gastos categorizados.</p>
+                                    </div>
+                                    <span className="text-sm font-bold text-destructive shrink-0">
+                                        {formatCurrencyCode(transferDifferences.reduce((sum, item) => sum + item.difference, 0), displayCurrency)}
+                                    </span>
+                                </div>
+                                <div className="divide-y divide-border rounded-md border border-border/60">
+                                    {transferDifferences.map(({ tx, difference }) => {
+                                        const destinationCurrency = tx.to_currency || tx.currency || "ARS";
+                                        const destinationAmount = getTransferDestinationAmount(tx, destinationCurrency);
+                                        return (
+                                            <div key={tx.id} className="flex items-center justify-between gap-3 px-3 py-2 text-xs">
+                                                <div className="min-w-0">
+                                                    <p className="font-medium truncate">{tx.description || "Transferencia"}</p>
+                                                    <p className="text-muted-foreground truncate">
+                                                        {formatCurrencyCode(tx.amount, tx.currency || "ARS")} → {formatCurrencyCode(destinationAmount, destinationCurrency)}
+                                                    </p>
+                                                </div>
+                                                <span className={cn("font-semibold shrink-0", difference < 0 ? "text-destructive" : "text-primary")}>
+                                                    {difference >= 0 ? "+" : ""}{formatCurrencyCode(difference, displayCurrency)}
+                                                </span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </CardContent>
+                        </Card>
                     )}
 
                     {/* Resumen de presupuestos del mes */}
@@ -503,6 +589,24 @@ export default function Projected() {
                         </div>
                     )}
 
+                    {unplannedExpenses.length > 0 && (
+                        <Link to={`/budgets?month=${selectedMonth}`} className="block">
+                            <Card className="border-destructive/30 hover:bg-muted/20 transition-colors">
+                                <CardContent className="p-3 flex items-center justify-between gap-3">
+                                    <div className="min-w-0">
+                                        <p className="text-sm font-semibold text-destructive">Desvíos del mes</p>
+                                        <p className="text-xs text-muted-foreground truncate">
+                                            {unplannedExpenses.length} gasto{unplannedExpenses.length !== 1 ? "s" : ""} sin presupuesto ni proyección
+                                        </p>
+                                    </div>
+                                    <span className="text-sm font-bold text-destructive shrink-0">
+                                        {formatCurrencyCode(unplannedTotal, displayCurrency)}
+                                    </span>
+                                </CardContent>
+                            </Card>
+                        </Link>
+                    )}
+
                     <div>
                         <h3 className="text-sm font-semibold text-muted-foreground mb-2">
                             {incomeBudgets.length + expenseBudgets.length > 0 ? `Proyecciones adicionales de ${getMonthLabel(selectedMonth)}` : `Proyecciones de ${getMonthLabel(selectedMonth)}`}
@@ -551,6 +655,45 @@ export default function Projected() {
                             </Card>
                         )}
                     </div>
+
+                    {transferDifferences.length > 0 && (
+                        <div>
+                            <button
+                                type="button"
+                                className="flex w-full items-center justify-between gap-3 mb-2 text-left"
+                                onClick={() => setTransferExpanded((expanded) => !expanded)}
+                            >
+                                <span className="flex items-center gap-1.5 text-sm font-semibold text-muted-foreground">
+                                    <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", transferExpanded && "rotate-180")} />
+                                    Diferencias de transferencias
+                                </span>
+                                <span className="text-sm font-semibold text-destructive">
+                                    {formatCurrencyCode(transferDifferences.reduce((sum, item) => sum + item.difference, 0), displayCurrency)}
+                                </span>
+                            </button>
+                            {transferExpanded && <Card className="overflow-hidden border-amber-500/30">
+                                <div className="divide-y divide-border">
+                                    {transferDifferences.map(({ tx, difference }) => {
+                                        const destinationCurrency = tx.to_currency || tx.currency || "ARS";
+                                        const destinationAmount = getTransferDestinationAmount(tx, destinationCurrency);
+                                        return (
+                                            <div key={tx.id} className="flex items-center justify-between gap-3 p-3">
+                                                <div className="min-w-0">
+                                                    <p className="text-sm font-medium truncate">{tx.description || "Transferencia"}</p>
+                                                    <p className="text-xs text-muted-foreground truncate">
+                                                        {formatCurrencyCode(tx.amount, tx.currency || "ARS")} → {formatCurrencyCode(destinationAmount, destinationCurrency)}
+                                                    </p>
+                                                </div>
+                                                <span className={cn("text-sm font-semibold shrink-0", difference < 0 ? "text-destructive" : "text-primary")}>
+                                                    {difference >= 0 ? "+" : ""}{formatCurrencyCode(difference, displayCurrency)}
+                                                </span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </Card>}
+                        </div>
+                    )}
                 </div>
             )}
 

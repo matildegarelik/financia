@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Trash2, Pencil, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
+import { Plus, Trash2, Pencil, ChevronLeft, ChevronRight, RefreshCw, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -11,11 +11,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import PageHeader from "@/components/shared/PageHeader";
-import { formatCurrencyCode } from "@/lib/formatters";
+import { formatCurrencyCode, formatDate } from "@/lib/formatters";
 import {
     getBudgetProgress,
     getChildCategoryCount,
     getMonthBudgets,
+    getUnplannedExpenses,
     splitBudgetsByType,
     sumConvertedBudgetAmounts,
     sumConvertedBudgetProgress,
@@ -26,6 +27,7 @@ import { motion } from "framer-motion";
 import { format, startOfMonth, endOfMonth, addMonths, subMonths } from "date-fns";
 import { es } from "date-fns/locale";
 import { toast } from "sonner";
+import { useSearchParams } from "react-router-dom";
 
 function toMonthKey(date) {
     return format(date, "yyyy-MM");
@@ -34,7 +36,13 @@ function toMonthKey(date) {
 export default function Budgets() {
     const [showForm, setShowForm] = useState(false);
     const [editing, setEditing] = useState(null);
-    const [currentMonth, setCurrentMonth] = useState(new Date());
+    const [searchParams] = useSearchParams();
+    const [currentMonth, setCurrentMonth] = useState(() => {
+        const requestedMonth = searchParams.get("month");
+        if (!/^\d{4}-\d{2}$/.test(requestedMonth || "")) return new Date();
+        const [year, month] = requestedMonth.split("-").map(Number);
+        return new Date(year, month - 1, 1);
+    });
     const queryClient = useQueryClient();
     const { displayCurrency, convert } = useCurrency();
 
@@ -92,6 +100,17 @@ export default function Budgets() {
     const totalSpent = sumConvertedBudgetProgress(expBudgets, transactions, { ...budgetProgressOptions, convert });
     const isCurrentMonth = monthKey === toMonthKey(new Date());
 
+    const unplannedExpenses = getUnplannedExpenses(transactions, budgets, {
+        categories,
+        from: monthStart,
+        to: monthEnd,
+        context: { accounts, statements },
+    });
+    const unplannedTotal = unplannedExpenses.reduce(
+        (sum, tx) => sum + convert(tx.amount || 0, tx.currency || "ARS"),
+        0
+    );
+
     return (
         <div className="space-y-5">
             <PageHeader
@@ -146,6 +165,42 @@ export default function Budgets() {
                     </CardContent>
                 </Card>
             )}
+
+            {false && (
+               <Card className="border-destructive/30">
+                   <CardContent className="p-4 space-y-3">
+                       <div className="flex items-start gap-3">
+                           <AlertTriangle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+                           <div className="min-w-0">
+                               <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                                   <h2 className="font-semibold">Gastos no planificados</h2>
+                                   <span className="font-semibold text-destructive">
+                                       {formatCurrencyCode(unplannedTotal, displayCurrency)}
+                                   </span>
+                               </div>
+                               <p className="text-xs text-muted-foreground mt-0.5">
+                                   Gastos reales de {format(currentMonth, "MMMM", { locale: es })} sin presupuesto ni proyección equivalente.
+                               </p>
+                           </div>
+                       </div>
+                       <div className="divide-y divide-border rounded-md border border-border/60">
+                           {unplannedExpenses.map((tx) => (
+                               <div key={tx.id} className="flex items-center justify-between gap-3 px-3 py-2.5 text-sm">
+                                   <div className="min-w-0">
+                                       <p className="font-medium truncate">{tx.description || "Gasto sin descripción"}</p>
+                                       <p className="text-xs text-muted-foreground truncate">
+                                           {formatDate(tx.date)} · {tx.category_name || "Sin categoría"}
+                                       </p>
+                                   </div>
+                                   <span className="font-semibold text-destructive shrink-0">
+                                       {formatCurrencyCode(tx.amount, tx.currency || "ARS")}
+                                   </span>
+                               </div>
+                           ))}
+                       </div>
+                   </CardContent>
+               </Card>
+           )}
 
             {budgets.length === 0 ? (
                 <div className="text-center py-12 text-muted-foreground">
@@ -248,6 +303,50 @@ export default function Budgets() {
                     )}
                 </div>
             )}
+
+            <>
+            {unplannedExpenses.length > 0 ? (
+                <Card className="border-destructive/30">
+                    <CardContent className="p-4 space-y-3">
+                        <div className="flex items-start gap-3">
+                            <AlertTriangle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+                            <div className="min-w-0">
+                                <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                                    <h2 className="font-semibold">Gastos no planificados</h2>
+                                    <span className="font-semibold text-destructive">{formatCurrencyCode(unplannedTotal, displayCurrency)}</span>
+                                </div>
+                                <p className="text-xs text-muted-foreground mt-0.5">
+                                    Gastos reales sin presupuesto para {format(currentMonth, "MMMM", { locale: es })}.
+                                </p>
+                            </div>
+                        </div>
+                        <div className="divide-y divide-border rounded-md border border-border/60">
+                            {unplannedExpenses.map((tx) => (
+                                <div key={tx.id} className="flex items-center justify-between gap-3 px-3 py-2.5 text-sm">
+                                    <div className="min-w-0">
+                                        <p className="font-medium truncate">{tx.description || "Gasto sin descripción"}</p>
+                                        <p className="text-xs text-muted-foreground truncate">{formatDate(tx.date)} · {tx.category_name || "Sin categoría"}</p>
+                                    </div>
+                                    <span className="font-semibold text-destructive shrink-0">{formatCurrencyCode(tx.amount, tx.currency || "ARS")}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </CardContent>
+                </Card>
+            ) : (
+                <Card>
+                    <CardContent className="p-4 flex items-center gap-3">
+                        <AlertTriangle className="h-5 w-5 text-muted-foreground shrink-0" />
+                        <div>
+                            <h2 className="font-semibold">Gastos no planificados</h2>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                                No hay gastos reales fuera de los presupuestos de este mes.
+                            </p>
+                        </div>
+                    </CardContent>
+                </Card>
+            )}
+            </>
 
             <BudgetFormDialog
                 open={showForm || !!editing}

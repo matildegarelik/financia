@@ -1,4 +1,4 @@
-import { isRegularExpense, isRegularIncome } from "@/lib/formatters";
+import { getReportingDate, isRegularExpense, isRegularIncome } from "@/lib/formatters";
 import { transactionMatchesReportPeriod } from "@/domain/reporting";
 
 export function getMonthBudgets(budgets = [], monthKey) {
@@ -65,4 +65,33 @@ export function sumConvertedBudgetProgress(budgets = [], transactions = [], opti
         sum + convert(getBudgetProgress(budget, transactions, options), budget.currency || "ARS"),
         0
     );
+}
+
+export function getUnplannedExpenses(transactions = [], budgets = [], {
+    categories = [],
+    from,
+    to,
+    context = {},
+    includeFuture = true,
+} = {}) {
+    const { expenseBudgets } = splitBudgetsByType(budgets, categories);
+    return transactions
+        .filter((tx) => {
+            if (!isRegularExpense(tx) || (tx.status !== "confirmed" && tx.status !== "installment")) return false;
+            if (!transactionMatchesReportPeriod(tx, { from, to, context, includeFuture })) return false;
+
+            const coveredByBudget = expenseBudgets.some((budget) =>
+                transactionMatchesBudget(tx, budget, { categories, from, to, context, includeFuture })
+            );
+            if (coveredByBudget) return false;
+
+            // Keep every real expense outside the budget visible. A projection
+            // should not hide the actual movement from the deviation detail.
+            return true;
+        })
+        .sort((a, b) => {
+            const aDate = getReportingDate(a, context) || a.date || "";
+            const bDate = getReportingDate(b, context) || b.date || "";
+            return bDate.localeCompare(aDate);
+        });
 }
