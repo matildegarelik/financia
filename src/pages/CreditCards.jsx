@@ -1,7 +1,7 @@
 ﻿import React, { useEffect, useMemo, useState } from "react";
 import { base44 } from "@/api/base44Client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarDays, CheckCircle2, ChevronDown, CreditCard, Pencil, WalletCards } from "lucide-react";
+import { CalendarDays, CheckCircle2, ChevronDown, CreditCard, Pencil, Undo2, WalletCards } from "lucide-react";
 import PageHeader from "@/components/shared/PageHeader";
 import CurrencySelector from "@/components/shared/CurrencySelector";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { TODAY, formatCurrencyCode, formatDate } from "@/lib/formatters";
 import { computeAccountBalance } from "@/domain/transactions";
@@ -24,6 +25,30 @@ import {
     getStatementMonthKey,
     transactionMatchesStatement,
 } from "@/domain/creditCards";
+
+function monthIndex(date) {
+    if (!date) return null;
+    const [year, month] = date.slice(0, 7).split("-").map(Number);
+    return Number.isFinite(year) && Number.isFinite(month) ? year * 12 + month : null;
+}
+
+function getDisplayedInstallment(tx, transactions) {
+    const total = Number(tx.installment_total);
+    if (!total) return null;
+
+    const related = tx.installment_group_id
+        ? transactions.filter((candidate) => candidate.installment_group_id === tx.installment_group_id && candidate.date)
+        : [];
+    const firstDate = related.length > 0
+        ? related.reduce((first, candidate) => candidate.date < first ? candidate.date : first, related[0].date)
+        : (tx.purchase_date || tx.date);
+    const start = monthIndex(firstDate);
+    const current = monthIndex(tx.date);
+    const calculated = start !== null && current !== null ? Math.max(1, current - start + 1) : 1;
+    const stored = Number(tx.installment_current) || 1;
+
+    return { current: Math.max(stored, calculated), total };
+}
 
 export default function CreditCards() {
     const queryClient = useQueryClient();
@@ -129,6 +154,34 @@ export default function CreditCards() {
         onError: (error) => toast.error(error.message || "No se pudo registrar el pago"),
     });
 
+    const undoPayStatementMut = useMutation({
+        mutationFn: async (statement) => {
+            if (statement.payment_transaction_id) {
+                await base44.entities.Transaction.delete(statement.payment_transaction_id);
+            }
+
+            return base44.entities.CreditCardStatement.update(statement.id, {
+                account_id: statement.account_id,
+                period_start: statement.period_start,
+                period_end: statement.period_end,
+                close_date: statement.close_date,
+                due_date: statement.due_date,
+                total_amount: statement.total_amount,
+                currency: statement.currency,
+                status: "open",
+                payment_account_id: null,
+                payment_transaction_id: null,
+                notes: statement.notes || null,
+            });
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ["transactions"] });
+            queryClient.invalidateQueries({ queryKey: ["credit_card_statements"] });
+            toast.success("Pago de tarjeta deshecho");
+        },
+        onError: (error) => toast.error(error.message || "No se pudo deshacer el pago"),
+    });
+
     return (
         <div className="space-y-5">
             <PageHeader
@@ -169,6 +222,8 @@ export default function CreditCards() {
                             onEdit={(statement) => setEditing({ card: selectedCard, statement })}
                             onPay={(statement, paymentAccount) => payStatementMut.mutate({ statement, paymentAccount })}
                             paying={payStatementMut.isPending}
+                            onUndoPay={(statement) => undoPayStatementMut.mutate(statement)}
+                            undoing={undoPayStatementMut.isPending}
                         />
                     )}
                 </div>
@@ -187,13 +242,14 @@ export default function CreditCards() {
     );
 }
 
-function CreditCardPanel({ card, transactions, statements, accounts, onEdit, onPay, paying }) {
+function CreditCardPanel({ card, transactions, statements, accounts, onEdit, onPay, paying, onUndoPay, undoing }) {
+    const [showPrevious, setShowPrevious] = useState(false);
     const statementsByMonth = useMemo(
         () => buildStatementsByMonth(statements, card.id),
         [statements, card.id]
     );
     const months = useMemo(
-        () => getRelevantStatementMonths(card, transactions, { pastMonths: 1, futureMonths: 3, today: TODAY }),
+        () => getRelevantStatementMonths(card, transactions, { pastMonths: 3, futureMonths: 3, today: TODAY }),
         [card, transactions]
     );
     const monthlyStatements = useMemo(
@@ -202,25 +258,33 @@ function CreditCardPanel({ card, transactions, statements, accounts, onEdit, onP
             .filter((statement) => statement.total_amount > 0 || statement.id || statement.due_date >= TODAY),
         [card, months, statementsByMonth, transactions]
     );
+    const statementPool = monthlyStatements.filter((statement) => statement.status !== "paid");
 
     const nextDueStatement = useMemo(
-        () => monthlyStatements
-            .filter((statement) => statement.due_date >= TODAY && statement.close_date < TODAY)
-            .sort((a, b) => a.due_date.localeCompare(b.due_date))[0]
-            || monthlyStatements
-                .filter((statement) => statement.due_date >= TODAY && statement.total_amount > 0)
-                .sort((a, b) => a.due_date.localeCompare(b.due_date))[0],
-        [monthlyStatements]
+        () => {
+            const dueOrOverdue = statementPool
+                .filter((statement) => statement.total_amount > 0 && statement.close_date < TODAY)
+                .sort((a, b) => b.due_date.localeCompare(a.due_date));
+            return dueOrOverdue[0]
+                || statementPool
+                    .filter((statement) => statement.due_date >= TODAY && statement.total_amount > 0)
+                    .sort((a, b) => a.due_date.localeCompare(b.due_date))[0];
+        },
+        [statementPool]
     );
     const nextCloseStatement = useMemo(
-        () => monthlyStatements
+        () => statementPool
             .filter((statement) => statement.close_date >= TODAY)
             .sort((a, b) => a.close_date.localeCompare(b.close_date))[0],
-        [monthlyStatements]
+        [statementPool]
     );
     const visibleStatements = [nextDueStatement, nextCloseStatement]
         .filter(Boolean)
         .filter((statement, index, all) => all.findIndex((item) => getStatementMonthKey(item) === getStatementMonthKey(statement)) === index);
+    const visibleStatementKeys = new Set(visibleStatements.map((statement) => getStatementMonthKey(statement)));
+    const previousStatements = monthlyStatements
+        .filter((statement) => statement.close_date < TODAY && !visibleStatementKeys.has(getStatementMonthKey(statement)))
+        .sort((a, b) => b.close_date.localeCompare(a.close_date));
     const effective = computeAccountBalance(card, transactions);
     const debt = Math.max(0, -effective);
 
@@ -258,6 +322,8 @@ function CreditCardPanel({ card, transactions, statements, accounts, onEdit, onP
                     </div>
                 </div>
 
+                
+
                 <div className="space-y-2">
                     {visibleStatements.length === 0 ? (
                         <div className="rounded-lg border border-border/60 p-4 text-center text-sm text-muted-foreground">
@@ -266,7 +332,9 @@ function CreditCardPanel({ card, transactions, statements, accounts, onEdit, onP
                     ) : visibleStatements.map((statement) => (
                         <StatementMonthRow
                             key={`${statement.account_id}:${getStatementMonthKey(statement)}`}
-                            label={statement === nextDueStatement ? "Proximo a vencer" : "Proximo a cerrar"}
+                            label={statement === nextDueStatement
+                                ? (statement.due_date < TODAY ? "Vencida" : "Proximo a vencer")
+                                : "Proximo a cerrar"}
                             statement={statement}
                             transactions={transactions}
                             card={card}
@@ -274,15 +342,49 @@ function CreditCardPanel({ card, transactions, statements, accounts, onEdit, onP
                             onEdit={() => onEdit(statement)}
                             onPay={onPay}
                             paying={paying}
+                            onUndoPay={onUndoPay}
+                            undoing={undoing}
                         />
                     ))}
                 </div>
+
+                <div className="flex items-center justify-between gap-3">
+                    <label htmlFor={`show-previous-${card.id}`} className="text-xs text-muted-foreground cursor-pointer">
+                        Ver anteriores
+                    </label>
+                    <Switch
+                        id={`show-previous-${card.id}`}
+                        checked={showPrevious}
+                        onCheckedChange={setShowPrevious}
+                        aria-label="Ver anteriores"
+                    />
+                </div>
+
+                {showPrevious && previousStatements.length > 0 && (
+                    <div className="space-y-2">
+                        {previousStatements.map((statement) => (
+                            <StatementMonthRow
+                                key={`${statement.account_id}:${getStatementMonthKey(statement)}`}
+                                label={statement.status === "paid" ? "Pagada" : statement.due_date < TODAY ? "Vencida" : "Anterior"}
+                                statement={statement}
+                                transactions={transactions}
+                                card={card}
+                                accounts={accounts}
+                                onEdit={() => onEdit(statement)}
+                                onPay={onPay}
+                                paying={paying}
+                                onUndoPay={onUndoPay}
+                                undoing={undoing}
+                            />
+                        ))}
+                    </div>
+                )}
             </CardContent>
         </Card>
     );
 }
 
-function StatementMonthRow({ label, statement, transactions, card, accounts, onEdit, onPay, paying }) {
+function StatementMonthRow({ label, statement, transactions, card, accounts, onEdit, onPay, paying, onUndoPay, undoing }) {
     const [expanded, setExpanded] = useState(false);
     const monthKey = getStatementMonthKey(statement);
     const statementTransactions = useMemo(
@@ -350,7 +452,17 @@ function StatementMonthRow({ label, statement, transactions, card, accounts, onE
                     <Badge variant={isPaid ? "secondary" : hasEnoughBalance ? "outline" : "destructive"} className="text-xs">
                         {isPaid ? "Pagado" : !paymentAccount ? "Falta cuenta" : !sameCurrency ? "Revisar moneda" : hasEnoughBalance ? "Saldo suficiente" : "Saldo insuficiente"}
                     </Badge>
-                    {!isPaid && statement.total_amount > 0 && (
+                    {isPaid ? (
+                        <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-xs"
+                            disabled={undoing}
+                            onClick={() => onUndoPay(statement)}
+                        >
+                            <Undo2 className="h-3.5 w-3.5 mr-1" />Deshacer pago
+                        </Button>
+                    ) : statement.total_amount > 0 && (
                         <Button
                             size="sm"
                             variant="outline"
@@ -372,9 +484,10 @@ function StatementMonthRow({ label, statement, transactions, card, accounts, onE
                                 <span>{formatDate(tx.date)}</span>
                                 <span> · </span>
                                 <span className="text-foreground">{tx.description || "Consumo"}</span>
-                                {tx.installment_current && tx.installment_total && (
-                                    <span> · cuota {tx.installment_current}/{tx.installment_total}</span>
-                                )}
+                                {(() => {
+                                    const installment = getDisplayedInstallment(tx, transactions);
+                                    return installment && <span> · cuota {installment.current}/{installment.total}</span>;
+                                })()}
                             </div>
                             <span className="font-medium">{formatCurrencyCode(tx.amount, tx.currency || statement.currency || "ARS")}</span>
                         </div>
