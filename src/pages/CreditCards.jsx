@@ -1,7 +1,7 @@
 ﻿import React, { useEffect, useMemo, useState } from "react";
 import { base44 } from "@/api/base44Client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarDays, CheckCircle2, ChevronDown, CreditCard, Pencil, Undo2, WalletCards } from "lucide-react";
+import { CheckCircle2, ChevronDown, CreditCard, Pencil, Undo2, WalletCards } from "lucide-react";
 import PageHeader from "@/components/shared/PageHeader";
 import CurrencySelector from "@/components/shared/CurrencySelector";
 import { Button } from "@/components/ui/button";
@@ -309,7 +309,13 @@ function CreditCardPanel({ card, transactions, statements, accounts, onEdit, onP
                         <div className="min-w-0">
                             <CardTitle className="text-base truncate">{card.name}</CardTitle>
                             <p className="text-xs text-muted-foreground">
-                                Cierre por defecto: penultimo jueves. Vence: primer lunes del mes siguiente.
+                                {card.statement_close_day
+                                    ? `Cierre: día ${card.statement_close_day}`
+                                    : "Cierre: penúltimo jueves del mes (default)"}
+                                {" · "}
+                                {card.statement_due_day
+                                    ? `Vencimiento: día ${card.statement_due_day}`
+                                    : "Vencimiento: primer lunes del mes siguiente (default)"}
                             </p>
                         </div>
                     </div>
@@ -317,22 +323,12 @@ function CreditCardPanel({ card, transactions, statements, accounts, onEdit, onP
                 </div>
             </CardHeader>
             <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 gap-3">
-                    <div>
-                        <p className="text-xs text-muted-foreground">Deuda actual</p>
-                        <p className={cn("text-xl font-bold", debt > 0 ? "text-destructive" : "text-primary")}>
-                            {formatCurrencyCode(debt, card.currency || "ARS")}
-                        </p>
-                    </div>
-                    <div className="text-right">
-                        <p className="text-xs text-muted-foreground">Tarjeta</p>
-                        <p className="text-xl font-bold">
-                            {card.name}
-                        </p>
-                    </div>
+                <div>
+                    <p className="text-xs text-muted-foreground">Deuda actual</p>
+                    <p className={cn("text-xl font-bold", debt > 0 ? "text-destructive" : "text-primary")}>
+                        {formatCurrencyCode(debt, card.currency || "ARS")}
+                    </p>
                 </div>
-
-                
 
                 <div className="space-y-2">
                     {visibleStatements.length === 0 ? (
@@ -411,101 +407,105 @@ function StatementMonthRow({ label, statement, transactions, card, accounts, onE
     const isPaid = statement.status === "paid";
     const enrichedStatement = { ...statement, card_name: card.name };
 
+    const statusLabel = isPaid ? "Pagado" : !paymentAccount ? "Falta cuenta" : !sameCurrency ? "Revisar moneda" : hasEnoughBalance ? "Saldo suficiente" : "Saldo insuficiente";
+
     return (
-        <div className={cn("rounded-lg border p-3 space-y-3", isPastDue ? "border-destructive/40 bg-destructive/5" : "border-border/60")}>
-            <div className="flex items-start justify-between gap-3">
+        <div className={cn("rounded-lg border", isPastDue ? "border-destructive/40 bg-destructive/5" : "border-border/60")}>
+            <button type="button" className="w-full flex items-center justify-between gap-3 p-3 text-left min-h-[44px]"
+                onClick={() => setExpanded((value) => !value)}>
                 <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                         <Badge variant="outline" className="text-xs">{label}</Badge>
                         <p className="text-sm font-semibold">{monthKey}</p>
                     </div>
                     <p className="text-xs text-muted-foreground">
-                        Cierra {formatDate(statement.close_date)} · vence {formatDate(statement.due_date)}
+                        {formatCurrencyCode(statement.total_amount, statement.currency || "ARS")}
+                        {" · "}
+                        <Badge variant={isPaid ? "secondary" : hasEnoughBalance ? "outline" : "destructive"} className="text-[10px] px-1.5 py-0 ml-0.5">
+                            {statusLabel}
+                        </Badge>
                     </p>
                 </div>
-                <div className="flex items-center gap-1 shrink-0">
-                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setExpanded((value) => !value)}>
-                        <ChevronDown className={cn("h-4 w-4 transition-transform", expanded && "rotate-180")} />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onEdit}>
-                        <Pencil className="h-4 w-4" />
-                    </Button>
-                </div>
-            </div>
+                <ChevronDown className={cn("h-4 w-4 text-muted-foreground shrink-0 transition-transform", expanded && "rotate-180")} />
+            </button>
 
-            <div className="flex items-center justify-between gap-3 rounded-md bg-muted/30 px-3 py-2">
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <CalendarDays className="h-3.5 w-3.5" />
-                    <span>Total a pagar al vencimiento</span>
-                </div>
-                <p className={cn("text-sm font-bold", statement.total_amount > 0 ? "text-destructive" : "text-muted-foreground")}>
-                    {formatCurrencyCode(statement.total_amount, statement.currency || "ARS")}
-                </p>
-            </div>
-
-            <div className="rounded-md border border-border/60 px-3 py-2 space-y-1.5">
-                <div className="flex items-center justify-between gap-3 text-xs">
-                    <span className="text-muted-foreground">Cuenta de pago</span>
-                    <span className="font-medium text-right">
-                        {paymentAccount ? `${paymentAccount.name} (${paymentAccount.currency || "ARS"})` : "Sin configurar"}
-                    </span>
-                </div>
-                {paymentAccount && (
-                    <div className="flex items-center justify-between gap-3 text-xs">
-                        <span className="text-muted-foreground">Saldo disponible</span>
-                        <span className={cn("font-medium", sameCurrency && !hasEnoughBalance ? "text-destructive" : "text-foreground")}>
-                            {formatCurrencyCode(paymentBalance, paymentAccount.currency || "ARS")}
-                        </span>
+            {expanded && (
+                <div className="border-t border-border/60 p-3 space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                        <p className="text-xs text-muted-foreground">
+                            Cierra {formatDate(statement.close_date)} · vence {formatDate(statement.due_date)}
+                        </p>
+                        <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0" onClick={(e) => { e.stopPropagation(); onEdit(); }}>
+                            <Pencil className="h-4 w-4" />
+                        </Button>
                     </div>
-                )}
-                <div className="flex items-center justify-between gap-2">
-                    <Badge variant={isPaid ? "secondary" : hasEnoughBalance ? "outline" : "destructive"} className="text-xs">
-                        {isPaid ? "Pagado" : !paymentAccount ? "Falta cuenta" : !sameCurrency ? "Revisar moneda" : hasEnoughBalance ? "Saldo suficiente" : "Saldo insuficiente"}
-                    </Badge>
-                    {isPaid ? (
-                        <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7 text-xs"
-                            disabled={undoing}
-                            onClick={() => onUndoPay(statement)}
-                        >
-                            <Undo2 className="h-3.5 w-3.5 mr-1" />Deshacer pago
-                        </Button>
-                    ) : statement.total_amount > 0 && (
-                        <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7 text-xs"
-                            disabled={!paymentAccount || !sameCurrency || paying}
-                            onClick={() => onPay(enrichedStatement, paymentAccount)}
-                        >
-                            <CheckCircle2 className="h-3.5 w-3.5 mr-1" />Registrar pago
-                        </Button>
+
+                    <div className="rounded-md border border-border/60 px-3 py-2 space-y-1.5">
+                        <div className="flex items-center justify-between gap-3 text-xs">
+                            <span className="text-muted-foreground">Cuenta de pago</span>
+                            <span className="font-medium text-right">
+                                {paymentAccount ? `${paymentAccount.name} (${paymentAccount.currency || "ARS"})` : "Sin configurar"}
+                            </span>
+                        </div>
+                        {paymentAccount && (
+                            <div className="flex items-center justify-between gap-3 text-xs">
+                                <span className="text-muted-foreground">Saldo disponible</span>
+                                <span className={cn("font-medium", sameCurrency && !hasEnoughBalance ? "text-destructive" : "text-foreground")}>
+                                    {formatCurrencyCode(paymentBalance, paymentAccount.currency || "ARS")}
+                                </span>
+                            </div>
+                        )}
+                        {paymentAccount && !sameCurrency && !isPaid && (
+                            <p className="text-xs text-destructive">
+                                Esta tarjeta está en {statement.currency || "ARS"} y la cuenta de pago en {paymentAccount.currency || "ARS"} — elegí otra cuenta de pago en el mismo tipo de moneda, o configurá una cuenta de pago por defecto que coincida, para poder registrar el pago.
+                            </p>
+                        )}
+                        <div className="flex items-center justify-end">
+                            {isPaid ? (
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-9 text-xs"
+                                    disabled={undoing}
+                                    onClick={() => onUndoPay(statement)}
+                                >
+                                    <Undo2 className="h-3.5 w-3.5 mr-1" />Deshacer pago
+                                </Button>
+                            ) : statement.total_amount > 0 && (
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-9 text-xs"
+                                    disabled={!paymentAccount || !sameCurrency || paying}
+                                    onClick={() => onPay(enrichedStatement, paymentAccount)}
+                                >
+                                    <CheckCircle2 className="h-3.5 w-3.5 mr-1" />Registrar pago
+                                </Button>
+                            )}
+                        </div>
+                    </div>
+
+                    {statementTransactions.length > 0 ? (
+                        <div className="space-y-1.5">
+                            {statementTransactions.map((tx) => (
+                                <div key={tx.id} className="grid grid-cols-[1fr_auto] gap-3 text-xs">
+                                    <div className="min-w-0 text-muted-foreground">
+                                        <span>{formatDate(tx.date)}</span>
+                                        <span> · </span>
+                                        <span className="text-foreground">{tx.description || "Consumo"}</span>
+                                        {(() => {
+                                            const installment = getDisplayedInstallment(tx, transactions);
+                                            return installment && <span> · cuota {installment.current}/{installment.total}</span>;
+                                        })()}
+                                    </div>
+                                    <span className="font-medium">{formatCurrencyCode(tx.amount, tx.currency || statement.currency || "ARS")}</span>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <p className="text-xs text-muted-foreground">No hay consumos dentro de este periodo.</p>
                     )}
                 </div>
-            </div>
-
-            {expanded && statementTransactions.length > 0 && (
-                <div className="space-y-1.5">
-                    {statementTransactions.map((tx) => (
-                        <div key={tx.id} className="grid grid-cols-[1fr_auto] gap-3 text-xs">
-                            <div className="min-w-0 text-muted-foreground">
-                                <span>{formatDate(tx.date)}</span>
-                                <span> · </span>
-                                <span className="text-foreground">{tx.description || "Consumo"}</span>
-                                {(() => {
-                                    const installment = getDisplayedInstallment(tx, transactions);
-                                    return installment && <span> · cuota {installment.current}/{installment.total}</span>;
-                                })()}
-                            </div>
-                            <span className="font-medium">{formatCurrencyCode(tx.amount, tx.currency || statement.currency || "ARS")}</span>
-                        </div>
-                    ))}
-                </div>
-            )}
-            {expanded && statementTransactions.length === 0 && (
-                <p className="text-xs text-muted-foreground">No hay consumos dentro de este periodo.</p>
             )}
         </div>
     );

@@ -29,6 +29,7 @@ _Se va actualizando a medida que avanzamos. Última actualización: 2026-10-23._
 ### Resueltos recientemente (2026-10-25)
 - [x] **Bug de divisa al editar Inversiones/Cuentas/Presupuestos/Suscripciones/Proyectado.** Caso reportado: al editar una inversión de Binance en EUSDT, la divisa quedó guardada como ARS. Causa confirmada: el `<Select>` de moneda en esos 5 formularios estaba poblado **solo** con `activeCurrencies` (las monedas activas en Configuración, persistidas en `localStorage` — ver hallazgo 1.5). `Settings.jsx::removeCurrency` permite desactivar cualquier moneda sin chequear si algo la usa, y además `activeCurrencies` vive solo en el navegador: cambiar de dispositivo, limpiar el storage, o simplemente desactivarla en Configuración hace que esa divisa desaparezca de la lista de opciones, y al reabrir y guardar el registro se pierde silenciosamente. **Arreglado** en `Investments.jsx`, `Accounts.jsx`, `Budgets.jsx`, `Suscripciones.jsx` y `TransactionFormProjected.jsx`: cada formulario ahora incluye la divisa actual del registro en las opciones del `<Select>` aunque no esté en `activeCurrencies`, así nunca se pierde al editar y guardar.
 - [ ] **Dato ya corrompido a recuperar manualmente:** la inversión de Binance específica que se reportó quedó guardada como ARS antes de este fix — hay que volver a agregar "EUSDT" como divisa custom en Configuración y re-seleccionarla en esa inversión (los montos numéricos no cambiaron, solo la etiqueta de moneda estaba mal). El código nuevo previene que vuelva a pasar, pero no puede adivinar retroactivamente cuál era la divisa correcta de un dato ya sobrescrito.
+- [x] **3.5 — Transferencias: ya no se elige modo ni se ingresa tasa a mano.** Ahora siempre se ingresa monto origen + monto destino, y la tasa efectiva y la diferencia contra la tasa de referencia se calculan solas (ver sección 3.5 actualizada).
 
 ### Bugs y limpieza (sección de "empecemos por los bugs")
 - [x] 2.1 — Presupuestos mezclaban divisas sin convertir antes de sumar (`domain/budgets.js`)
@@ -122,9 +123,9 @@ Esa `exchange_difference` **no es cosmética**: se usa activamente en `domain/re
 - Con "sin ganancia" se puede estar ocultando una pérdida real (cambiaste a peor tasa) sin que quede registro en ningún lado.
 - No hay validación de que el monto recibido ingresado a mano sea razonable respecto a ninguna tasa.
 
-**Causa raíz común con 1.1/1.2:** no existe un concepto sólido de "tasa de mercado vigente a la fecha X" en toda la app — esta feature de ganancia/pérdida se construyó sobre esa base débil, por eso queda a mitad de camino.
+**Causa raíz común con 1.1/1.2:** no existe un concepto sólido de "tasa de mercado vigente a la fecha X" en toda la app — esta feature de ganancia/pérdida se construyó sobre esa base débil, por eso quedaba a mitad de camino.
 
-**Propuesta (a sumar al plan de acción):** una vez resuelto el tipo de cambio histórico por fecha (acción 6 del plan), reemplazar la elección manual de modo por un cálculo automático y consistente: comparar siempre el monto recibido contra la tasa de mercado vigente en la fecha de la transferencia, mostrar la diferencia como dato informativo en la transacción (no escondido), y decidir una sola vez si esa diferencia debe contarse como ingreso/gasto real o no (hoy se cuenta solo en modo `rate`, lo cual es arbitrario).
+**✅ RESUELTO (2026-10-25):** se eliminó la elección manual de modo del formulario. Ahora el flujo es único: se ingresa monto origen y monto destino (como antes era "amounts_neutral"), y la tasa efectiva se muestra calculada en pantalla (solo informativa, no editable). Todas las transferencias cross-currency nuevas usan `transfer_calculation_mode: "rate"` por default, así que `exchange_difference` se calcula siempre contra la tasa de referencia de Configuración — ya no hay que elegir "con/sin ganancia", queda registrada automáticamente. Las transferencias viejas guardadas como `amounts_neutral` conservan su comportamiento al editarlas (no se recalculan retroactivamente, ya no hay botón para cambiarles el modo). Sigue pendiente lo de fondo: la "tasa de referencia" contra la que se compara sigue siendo la actual de Configuración, no una histórica a la fecha (1.1/1.2) — eso queda igual hasta resolver esa parte estructural.
 
 ---
 
@@ -248,23 +249,16 @@ Caso planteado por la usuaria: una suscripción que en realidad paga ella pero l
 
 ---
 
-## 8. UI de Tarjetas de crédito — propuesta (no implementado, a decidir)
+## 8. UI de Tarjetas de crédito (implementado)
 
-Lo que encontré revisando `CreditCards.jsx`/`CreditCardPanel`/`StatementMonthRow` que explica por qué "se ve mal mobile y no es cómodo":
+Lo que encontré revisando `CreditCards.jsx`/`CreditCardPanel`/`StatementMonthRow` que explicaba por qué "se ve mal mobile y no es cómodo", y lo que se hizo con cada punto:
 
-- Hay un `<div>` vacío suelto (línea 335) — resto de una maqueta vieja, no afecta nada pero es ruido.
-- El texto "Cierre por defecto: penúltimo jueves..." está **hardcodeado siempre igual**, aunque la tarjeta tenga configurado un día de cierre custom (`statement_close_day`/`statement_due_day`) — muestra información incorrecta para cualquier tarjeta que no use el default.
-- La grilla superior (`Deuda actual` / `Tarjeta`) repite el nombre de la tarjeta dos veces (ya está en el título de la card arriba) — espacio desperdiciado en mobile.
-- Cada "mes" (`StatementMonthRow`) apila: badge+mes, fechas, un box de "Total a pagar", OTRO box con "Cuenta de pago" + "Saldo disponible" + badge de estado + botón — son 3-4 recuadros anidados con bordes distintos, visualmente "pesado" en una pantalla angosta.
-- Botones de ícono de 32×32px (`h-8 w-8`) para expandir/editar — por debajo del tamaño táctil recomendado (~44px), incómodos en mobile.
-- El estado "Revisar moneda" (cross-currency bloqueado) no explica qué hacer — queda como un callejón sin salida en la UI.
-
-**Propuesta de rediseño** (a confirmar antes de tocar código, es trabajo de UI puro — se beneficia de iterar con capturas):
-1. Sacar el texto hardcodeado de cierre/vencimiento; mostrar el real de la tarjeta (ya existe `getCreditCardStatementRange`).
-2. Colapsar cada mes a **una sola fila compacta** por defecto (mes, total, estado — un solo renglón), y mover todo el detalle (cuenta de pago, saldo, transacciones) a un panel expandible único, no varios recuadros apilados.
-3. Agrandar los targets táctiles a 40-44px en mobile.
-4. Quitar la celda duplicada del nombre de tarjeta.
-5. Reemplazar el bloqueo silencioso de "Revisar moneda" por un mensaje explícito ("Esta tarjeta y la cuenta de pago están en divisas distintas; elegí otra cuenta o configurá una del mismo tipo").
+- ✅ Había un `<div>` vacío suelto (resto de una maqueta vieja) — eliminado.
+- ✅ El texto "Cierre por defecto: penúltimo jueves..." estaba **hardcodeado siempre igual**, aunque la tarjeta tuviera configurado un día de cierre custom (`statement_close_day`/`statement_due_day`) — ahora muestra el día real configurado, o aclara "(default)" si no hay uno custom.
+- ✅ La grilla superior repetía el nombre de la tarjeta dos veces (ya está en el título) — se sacó la celda duplicada.
+- ✅ Cada "mes" apilaba 3-4 recuadros anidados (badge+mes, total, cuenta de pago, saldo, botón) siempre visibles — ahora cada mes es **una fila compacta colapsada por defecto** (mes + total + estado en una línea), y todo el detalle (fechas, cuenta de pago, saldo, acción de pago/deshacer, transacciones) vive en un panel único que se expande al tocar la fila.
+- ✅ Botones de ícono de 32×32px, por debajo del tamaño táctil recomendado — la fila completa ahora es el área clickeable (min-height 44px) para expandir, y el botón de editar pasó a 36×36px dentro del panel expandido.
+- ✅ El estado "Revisar moneda" no explicaba qué hacer — ahora, cuando aplica, muestra un mensaje explícito explicando que la tarjeta y la cuenta de pago están en divisas distintas y qué hacer al respecto.
 
 ## 9. Estadísticas — cumplimiento histórico de presupuesto (implementado)
 
@@ -308,10 +302,11 @@ Esto es la causa de fondo de la sensación de que "hay cosas que no cuadran": el
 3. ✅ **Hecho** — Entidad Terceros/Deudas (sección 5): nuevo esquema + pantalla + limpieza del checkbox viejo. Migración aplicada.
 4. ✅ **Hecho** — Suscripciones (sección 6): nuevo esquema + pantalla + caso de pagos a terceros. Migración aplicada.
 5. ✅ **Hecho** — Transferencias cross-currency (3.1, 4.1): validación dura que impide guardar con `to_amount` vacío/0, y conversión correcta en pago de tarjeta cross-currency.
-6. ⬜ **Siguiente candidato** — Tipo de cambio histórico (1.1, 1.2): el más grande y estructural — requiere guardar snapshot de tasa por transacción. No bloqueante para el uso diario, pero es la raíz de por qué los reportes históricos "se mueven solos" y de por qué la ganancia/pérdida de transferencias (3.5) queda a mitad de camino.
+6. ✅ **Hecho** — Flujo de transferencias simplificado (3.5): se ingresan monto origen + monto destino directamente, sin elegir modo ni ingresar tasa a mano; la tasa efectiva y la diferencia contra la tasa de referencia se calculan solas.
 7. ✅ **Hecho** — Categorías en lista/tabla jerárquica en vez de grilla de tarjetas (sección 10).
 8. ✅ **Hecho** — Estadísticas de cumplimiento histórico de presupuesto (sección 9).
-9. ⬜ **A decidir** — Rediseño de UI de tarjetas de crédito para mobile (sección 8) — ver propuesta, es trabajo visual puro.
-10. ⬜ **A decidir** — Repensar el modelo de Presupuestos vs. Proyectado (sección 11) — permitir duplicados hoy es la causa de fondo de varias rarezas que notó la usuaria. Es un cambio al motor de matching compartido con Proyectado, por eso lo dejo documentado para decidir el enfoque antes de tocarlo.
+9. ✅ **Hecho** — Rediseño de UI de tarjetas de crédito para mobile (sección 8): filas colapsadas por defecto, un solo panel de detalle, textos de cierre/vencimiento reales, targets táctiles más grandes, mensaje explícito en el caso de divisas distintas.
+10. ⬜ **Siguiente candidato** — Tipo de cambio histórico (1.1, 1.2): el más grande y estructural — requiere guardar snapshot de tasa por transacción. No bloqueante para el uso diario, pero es la raíz de por qué los reportes históricos "se mueven solos".
+11. ⬜ **A decidir** — Repensar el modelo de Presupuestos vs. Proyectado (sección 11) — permitir duplicados hoy es la causa de fondo de varias rarezas que notó la usuaria. Es un cambio al motor de matching compartido con Proyectado, por eso lo dejo documentado para decidir el enfoque antes de tocarlo.
 
 Ver el checklist detallado al principio del documento para el estado ítem por ítem.

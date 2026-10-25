@@ -39,7 +39,7 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
             amount: "",
             amount_gross: "",
             to_amount: "",
-            transfer_calculation_mode: "amounts_neutral",
+            transfer_calculation_mode: "rate",
             exchange_rate: "",
             currency: defaultAcc?.currency || activeCurrencies[0] || "ARS",
             description: "",
@@ -83,9 +83,6 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
         } else {
             set("to_account_id", accId);
             set("to_account_name", acc?.name || "");
-            if (acc?.currency && form.currency && acc.currency !== form.currency) {
-                set("exchange_rate", rates[`${form.currency}_${acc.currency}`] || "");
-            }
         }
     };
 
@@ -105,10 +102,9 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
         const isCrossCurrencyTransfer = form.type === "transfer" && destinationCurrency !== form.currency;
         const isLegacyTransfer = isCrossCurrencyTransfer && form.transfer_calculation_mode === "legacy";
         const referenceRate = isCrossCurrencyTransfer ? Number(rates[`${form.currency}_${destinationCurrency}`]) || null : null;
-        const enteredRate = parseFloat(form.exchange_rate);
-        const effectiveToAmount = isCrossCurrencyTransfer && form.transfer_calculation_mode === TRANSFER_CALCULATION_MODES.RATE && net > 0 && enteredRate > 0
-            ? net * enteredRate
-            : parseFloat(form.to_amount);
+        // El origen y destino los tipea la usuaria; la tasa efectiva y la diferencia contra
+        // la tasa de referencia se calculan solas (nunca se le pide la tasa a mano).
+        const effectiveToAmount = parseFloat(form.to_amount);
         if (isCrossCurrencyTransfer && !isLegacyTransfer && (!effectiveToAmount || effectiveToAmount <= 0)) {
             toast.error("Ingresá el monto recibido en la cuenta destino antes de guardar.");
             return;
@@ -293,43 +289,6 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
 
                             {isCrossCurrencyTransfer && (
                                 <div className="space-y-3 rounded-lg border border-border/60 bg-muted/20 p-3">
-                                    <div>
-                                        <Label className="text-xs">Conversión</Label>
-                                        <div className="grid grid-cols-2 gap-2 mt-1.5">
-                                            <Button type="button" size="sm"
-                                                variant={form.transfer_calculation_mode === "rate" ? "default" : "outline"}
-                                                onClick={() => {
-                                                    const rate = Number(form.exchange_rate) || Number(rates[`${form.currency}_${destinationCurrency}`]) || 0;
-                                                    setForm((p) => ({
-                                                        ...p,
-                                                        transfer_calculation_mode: "rate",
-                                                        exchange_rate: rate ? String(rate) : "",
-                                                        to_amount: rate && Number(p.amount) ? String((Number(p.amount) * rate).toFixed(2)) : p.to_amount,
-                                                    }));
-                                                }}>
-                                                Usar tasa
-                                            </Button>
-                                            <Button type="button" size="sm"
-                                                variant={form.transfer_calculation_mode === "amounts_neutral" ? "default" : "outline"}
-                                                onClick={() => set("transfer_calculation_mode", "amounts_neutral")}>
-                                                Montos sin ganancia
-                                            </Button>
-                                        </div>
-                                    </div>
-                                    {form.transfer_calculation_mode === "rate" && (
-                                        <div>
-                                            <Label className="text-xs">Tasa efectiva ({destinationCurrency} por {form.currency})</Label>
-                                            <Input type="number" step="0.00000001" min="0" value={form.exchange_rate}
-                                                onChange={(e) => {
-                                                    const rate = e.target.value;
-                                                    setForm((p) => ({
-                                                        ...p,
-                                                        exchange_rate: rate,
-                                                        to_amount: Number(rate) > 0 && Number(p.amount) ? String((Number(p.amount) * Number(rate)).toFixed(2)) : p.to_amount,
-                                                    }));
-                                                }} required />
-                                        </div>
-                                    )}
                                     <div className="grid grid-cols-3 gap-2 items-end">
                                         <div className="col-span-2">
                                             <Label>Monto recibido</Label>
@@ -340,6 +299,14 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
                                             {destinationCurrency}
                                         </div>
                                     </div>
+                                    {Number(form.amount) > 0 && Number(form.to_amount) > 0 && (
+                                        <p className="text-xs text-muted-foreground">
+                                            Tasa efectiva: {(Number(form.to_amount) / Number(form.amount)).toFixed(4)} {destinationCurrency} por {form.currency}
+                                            {Number(rates[`${form.currency}_${destinationCurrency}`]) > 0 && (
+                                                <> · la diferencia contra la tasa de referencia se registra automáticamente</>
+                                            )}
+                                        </p>
+                                    )}
                                 </div>
                             )}
                         </div>
