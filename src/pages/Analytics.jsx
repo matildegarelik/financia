@@ -1,7 +1,7 @@
 ﻿import React, { useMemo, useState } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery } from "@tanstack/react-query";
-import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell } from "recharts";
+import { BarChart, Bar, LineChart, Line, ComposedChart, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import PageHeader from "@/components/shared/PageHeader";
 import CurrencySelector from "@/components/shared/CurrencySelector";
 import { useCurrency } from "@/lib/currency-context";
-import { formatCurrency, getMonthLabel, TODAY, isRegularExpense, getTransferDifference, affectsReports } from "@/lib/formatters";
+import { formatCurrency, getCurrentMonth, getMonthLabel, TODAY, isRegularExpense, getTransferDifference, affectsReports } from "@/lib/formatters";
 import {
     filterReportTransactions,
     getMonthKey,
@@ -22,6 +22,8 @@ import {
     groupIncomeExpenseByPeriod,
     transactionMatchesReportType,
 } from "@/domain/reporting";
+import { getCategoryOverBudgetFrequency, getMonthlyBudgetCompliance } from "@/domain/budgets";
+import { addMonthsToKey } from "@/domain/creditCards";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
@@ -93,6 +95,11 @@ export default function Analytics() {
         queryKey: ["credit_card_statements"],
         queryFn: () => base44.entities.CreditCardStatement.list(),
     });
+    const { data: budgets = [] } = useQuery({
+        queryKey: ["budgets"],
+        queryFn: () => base44.entities.Budget.list(),
+    });
+    const [complianceMonths, setComplianceMonths] = useState(6);
 
     const handleRangePreset = (value) => {
         setRangePreset(value);
@@ -232,6 +239,36 @@ export default function Analytics() {
             });
         return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 6);
     }, [filteredTransactions, convert, displayCurrency]);
+
+    // Cumplimiento de presupuesto — independiente del filtro de fecha de arriba,
+    // siempre sobre los últimos N meses completos (no tiene sentido partir un mes).
+    const complianceMonthKeys = useMemo(() => {
+        const current = getCurrentMonth();
+        return Array.from({ length: complianceMonths }, (_, i) => addMonthsToKey(current, i - (complianceMonths - 1)));
+    }, [complianceMonths]);
+
+    const complianceData = useMemo(() =>
+        getMonthlyBudgetCompliance(budgets, transactions, {
+            categories, context: reportingContext, convert, months: complianceMonthKeys,
+        }).map((m) => ({
+            ...m,
+            month: getMonthLabel(m.monthKey),
+            budgeted: Math.round(m.budgeted),
+            spent: Math.round(m.spent),
+        })),
+        [budgets, transactions, categories, reportingContext, convert, complianceMonthKeys]
+    );
+    const monthsWithBudgets = complianceData.filter((m) => m.hasBudgets);
+    const avgCompliancePct = monthsWithBudgets.length
+        ? monthsWithBudgets.reduce((s, m) => s + (m.pct ?? 0), 0) / monthsWithBudgets.length
+        : null;
+
+    const overBudgetCategories = useMemo(() =>
+        getCategoryOverBudgetFrequency(budgets, transactions, {
+            categories, context: reportingContext, convert, months: complianceMonthKeys,
+        }).slice(0, 6),
+        [budgets, transactions, categories, reportingContext, convert, complianceMonthKeys]
+    );
 
     if (isLoading) {
         return (
@@ -423,6 +460,65 @@ export default function Analytics() {
                                 stroke="hsl(160, 84%, 28%)" strokeWidth={2} dot={false} fill="hsl(160, 84%, 28%)" />
                         </LineChart>
                     </ResponsiveContainer>
+                </CardContent>
+            </Card>
+
+            {/* Budget compliance history */}
+            <Card>
+                <CardHeader className="pb-2">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                        <CardTitle className="text-base">Cumplimiento de presupuesto</CardTitle>
+                        <Tabs value={String(complianceMonths)} onValueChange={(v) => setComplianceMonths(Number(v))}>
+                            <TabsList className="h-7">
+                                <TabsTrigger value="6" className="text-xs px-3">6 meses</TabsTrigger>
+                                <TabsTrigger value="12" className="text-xs px-3">12 meses</TabsTrigger>
+                            </TabsList>
+                        </Tabs>
+                    </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    {monthsWithBudgets.length === 0 ? (
+                        <p className="text-center text-muted-foreground py-8 text-sm">
+                            No hay presupuestos de gasto configurados en este rango.
+                        </p>
+                    ) : (
+                        <>
+                            <p className="text-xs text-muted-foreground">
+                                Promedio de cumplimiento: <span className="font-semibold text-foreground">{Math.round(avgCompliancePct)}%</span> del presupuesto
+                                ({monthsWithBudgets.length} mes{monthsWithBudgets.length !== 1 ? "es" : ""} con presupuesto configurado de {complianceMonths})
+                            </p>
+                            <ResponsiveContainer width="100%" height={260}>
+                                <ComposedChart data={complianceData}>
+                                    <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+                                    <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                                    <YAxis yAxisId="amount" tick={{ fontSize: 11 }} tickFormatter={(v) => `${Math.round(v / 1000)}k`} />
+                                    <YAxis yAxisId="pct" orientation="right" tick={{ fontSize: 11 }} tickFormatter={(v) => `${v}%`} domain={[0, 150]} />
+                                    <Tooltip formatter={(v, name) => name === "% cumplimiento" ? `${Math.round(v)}%` : formatCurrency(v, displayCurrency)} />
+                                    <Legend />
+                                    <Bar yAxisId="amount" dataKey="budgeted" name="Presupuestado" fill="hsl(199, 89%, 48%)" radius={[4, 4, 0, 0]} />
+                                    <Bar yAxisId="amount" dataKey="spent" name="Gastado" fill="hsl(0, 72%, 51%)" radius={[4, 4, 0, 0]} />
+                                    <Line yAxisId="pct" type="monotone" dataKey="pct" name="% cumplimiento" stroke="hsl(160, 84%, 28%)" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                                </ComposedChart>
+                            </ResponsiveContainer>
+                            {overBudgetCategories.length > 0 && (
+                                <div>
+                                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+                                        Categorías que más seguido se excedieron
+                                    </p>
+                                    <div className="space-y-1.5">
+                                        {overBudgetCategories.map((c) => (
+                                            <div key={c.category_name} className="flex items-center justify-between text-sm">
+                                                <span className="truncate">{c.category_name}</span>
+                                                <span className="text-destructive font-medium shrink-0">
+                                                    {c.overMonths}/{c.monthsWithBudget} meses excedida
+                                                </span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </>
+                    )}
                 </CardContent>
             </Card>
 

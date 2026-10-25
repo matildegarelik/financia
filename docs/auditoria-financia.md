@@ -45,6 +45,8 @@ _Se va actualizando a medida que avanzamos. Última actualización: 2026-10-23._
 - [x] Fix: el default de cuenta al "Registrar devolución" ahora resuelve a `default_payment_account_id` de la tarjeta cuando el préstamo/pago original se hizo con tarjeta de crédito, en vez de sugerir la tarjeta misma.
 - [x] Suscripciones (sección 6) — menú nuevo, pausable. Migración SQL aplicada (2026-10-25), feature operativa.
 - [x] Suscripciones pagadas a/para un tercero (sección 6.3) — reutiliza el mismo mecanismo de Terceros/Deudas, sin duplicar lógica (`domain/debts.js::buildDebtPayload` compartido entre alta manual y materialización automática).
+- [x] Categorías rediseñadas como lista jerárquica en vez de grilla de tarjetas (sección 10).
+- [x] Estadísticas: cumplimiento histórico de presupuesto en Analytics (sección 9) — `domain/budgets.js::getMonthlyBudgetCompliance`/`getCategoryOverBudgetFrequency`.
 
 ### Estructural (grande, no bloqueante para el uso diario)
 - [ ] 1.1 / 1.2 — Tipo de cambio histórico por fecha (hoy todo se recalcula con la tasa actual)
@@ -260,17 +262,19 @@ Lo que encontré revisando `CreditCards.jsx`/`CreditCardPanel`/`StatementMonthRo
 4. Quitar la celda duplicada del nombre de tarjeta.
 5. Reemplazar el bloqueo silencioso de "Revisar moneda" por un mensaje explícito ("Esta tarjeta y la cuenta de pago están en divisas distintas; elegí otra cuenta o configurá una del mismo tipo").
 
-## 9. Estadísticas — cumplimiento histórico de presupuesto (propuesta, no implementado)
+## 9. Estadísticas — cumplimiento histórico de presupuesto (implementado)
 
-Hoy `Analytics.jsx` tiene: Ingresos vs Gastos por período, Ahorro acumulado, Top categorías de gasto, Tarjeta vs otros medios, Top comercios. Ninguno responde "¿qué tan bien respeté los presupuestos que me puse?" a lo largo del tiempo — ese dato solo existe para el mes actual, en `Budgets.jsx`.
+`Analytics.jsx` tenía: Ingresos vs Gastos por período, Ahorro acumulado, Top categorías de gasto, Tarjeta vs otros medios, Top comercios — nada que respondiera "¿qué tan bien respeté los presupuestos que me puse?" a lo largo del tiempo (ese dato solo existía para el mes actual, en `Budgets.jsx`).
 
-**Propuesta:** una sección nueva (en Analytics o en una pestaña de Presupuestos) con:
-- Por cada uno de los últimos N meses (6/12, elegible): total presupuestado (gasto) vs. total gastado real contra esos mismos presupuestos, usando `domain/budgets.js::sumConvertedBudgetAmounts`/`sumConvertedBudgetProgress` ya existentes — no hace falta tocar el motor de cálculo, solo iterar meses pasados en vez de uno.
-- Gráfico de barras agrupadas (presupuestado vs. gastado) por mes, más una línea de "% cumplimiento" (gastado/presupuestado).
-- Posible drill-down por categoría: qué categorías se excedieron más seguido históricamente (candidatas a resubir el presupuesto) y cuáles sobraron siempre (candidatas a bajarlo).
-- Nota: esto queda más preciso una vez resuelto 1.1/1.2 (tasa histórica), porque hoy la conversión de divisa de meses pasados usa la tasa de hoy.
+**Se agregó** una tarjeta nueva "Cumplimiento de presupuesto" (independiente del filtro de fecha general, porque es inherentemente mensual):
+- Selector de ventana: últimos 6 o 12 meses.
+- Por cada mes: total presupuestado (gasto) vs. total gastado real contra esos mismos presupuestos — reutiliza `domain/budgets.js::sumConvertedBudgetAmounts`/`sumConvertedBudgetProgress`/`getBudgetProgress` ya existentes, sin tocar el motor de cálculo (nuevas funciones `getMonthlyBudgetCompliance`/`getCategoryOverBudgetFrequency` en `domain/budgets.js` que solo iteran meses pasados).
+- Gráfico combinado: barras (presupuestado vs. gastado) + línea de "% cumplimiento" en eje secundario.
+- Promedio de cumplimiento del período elegido.
+- Lista de "categorías que más seguido se excedieron" (cuántos de los meses con presupuesto configurado se gastó de más) — candidatas a resubir el presupuesto.
+- Meses sin ningún presupuesto de gasto configurado simplemente no aportan al promedio ni aparecen en la lista de categorías (no se inventa un "0% cumplimiento" sin sentido).
 
-Es una pantalla nueva razonablemente acotada (reutiliza funciones existentes, no requiere cambios de esquema). Puedo implementarla cuando lo confirmes.
+**Limitación conocida:** la precisión de meses pasados en otra divisa depende de 1.1/1.2 (tasa histórica) — hoy convierte con la tasa de hoy, igual que el resto de la app.
 
 ## 10. Categorías — tabla jerárquica (implementado)
 
@@ -302,7 +306,8 @@ Esto es la causa de fondo de la sensación de que "hay cosas que no cuadran": el
 5. ✅ **Hecho** — Transferencias cross-currency (3.1, 4.1): validación dura que impide guardar con `to_amount` vacío/0, y conversión correcta en pago de tarjeta cross-currency.
 6. ⬜ **Siguiente candidato** — Tipo de cambio histórico (1.1, 1.2): el más grande y estructural — requiere guardar snapshot de tasa por transacción. No bloqueante para el uso diario, pero es la raíz de por qué los reportes históricos "se mueven solos" y de por qué la ganancia/pérdida de transferencias (3.5) queda a mitad de camino.
 7. ✅ **Hecho** — Categorías en lista/tabla jerárquica en vez de grilla de tarjetas (sección 10).
-8. ⬜ **A decidir** — Rediseño de UI de tarjetas de crédito para mobile (sección 8), estadísticas de cumplimiento histórico de presupuesto (sección 9) — ver propuestas abajo, falta elegir alcance.
-9. ⬜ **A decidir** — Repensar el modelo de Presupuestos vs. Proyectado (sección 11) — permitir duplicados hoy es la causa de fondo de varias rarezas que notó la usuaria. Es un cambio al motor de matching compartido con Proyectado, por eso lo dejo documentado para decidir el enfoque antes de tocarlo.
+8. ✅ **Hecho** — Estadísticas de cumplimiento histórico de presupuesto (sección 9).
+9. ⬜ **A decidir** — Rediseño de UI de tarjetas de crédito para mobile (sección 8) — ver propuesta, es trabajo visual puro.
+10. ⬜ **A decidir** — Repensar el modelo de Presupuestos vs. Proyectado (sección 11) — permitir duplicados hoy es la causa de fondo de varias rarezas que notó la usuaria. Es un cambio al motor de matching compartido con Proyectado, por eso lo dejo documentado para decidir el enfoque antes de tocarlo.
 
 Ver el checklist detallado al principio del documento para el estado ítem por ítem.
