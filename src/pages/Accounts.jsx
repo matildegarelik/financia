@@ -412,6 +412,9 @@ function AccountFormDialog({ open, onClose, onSubmit, initial, accounts = [] }) 
     }, [initial, open]);
     const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
     const paymentAccounts = accounts.filter((a) => a.id !== initial?.id && a.type !== "credit_card" && a.type !== "investment");
+    // Igual que en Investments.jsx: si la cuenta ya usa una divisa desactivada en
+    // Configuración, la mostramos como opción para no perderla al editar y guardar.
+    const currencyOptions = activeCurrencies.includes(form.currency) ? activeCurrencies : [form.currency, ...activeCurrencies];
 
     const submit = (e) => {
         e.preventDefault();
@@ -443,7 +446,7 @@ function AccountFormDialog({ open, onClose, onSubmit, initial, accounts = [] }) 
                         <Select value={form.currency} onValueChange={(v) => set("currency", v)}>
                             <SelectTrigger><SelectValue /></SelectTrigger>
                             <SelectContent>
-                                {activeCurrencies.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                                {currencyOptions.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                             </SelectContent>
                         </Select>
                     </div>

@@ -35,6 +35,9 @@ export default function TransactionFormProjected({ open, onClose, onSubmit, acco
     }
 
     const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+    // Igual que en Investments.jsx/Accounts.jsx: no perder una divisa desactivada en
+    // Configuración que ya estaba usando esta proyección.
+    const currencyOptions = activeCurrencies.includes(form.currency) ? activeCurrencies : [form.currency, ...activeCurrencies];
 
     const handleCategoryChange = (val) => {
         if (val === "none") {
@@ -107,7 +110,7 @@ export default function TransactionFormProjected({ open, onClose, onSubmit, acco
                             <Select value={form.currency} onValueChange={(v) => set("currency", v)}>
                                 <SelectTrigger><SelectValue /></SelectTrigger>
                                 <SelectContent>
-                                    {activeCurrencies.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                                    {currencyOptions.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                                 </SelectContent>
                             </Select>
                         </div>

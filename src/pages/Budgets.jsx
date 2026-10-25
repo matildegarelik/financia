@@ -334,6 +334,9 @@ function BudgetFormDialog({ open, onClose, onSubmit, initial, categories, monthK
         else setForm({ category_name: "", amount: "", period: "monthly", spent: 0, currency: defaultCurrency });
     }, [initial, open]);
     const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+    // Igual que en Investments.jsx/Accounts.jsx: no perder una divisa desactivada en
+    // Configuración que ya estaba usando este presupuesto.
+    const currencyOptions = activeCurrencies.includes(form.currency) ? activeCurrencies : [form.currency, ...activeCurrencies];
 
     const handleCat = (id) => {
         const cat = categories.find((c) => c.id === id);
@@ -388,7 +391,7 @@ function BudgetFormDialog({ open, onClose, onSubmit, initial, categories, monthK
                         <div><Label>Moneda</Label>
                             <Select value={form.currency} onValueChange={(v) => set("currency", v)}>
                                 <SelectTrigger><SelectValue /></SelectTrigger>
-                                <SelectContent>{activeCurrencies.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                                <SelectContent>{currencyOptions.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
                             </Select>
                         </div>
                     </div>

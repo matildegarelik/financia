@@ -426,6 +426,10 @@ function InvestmentFormDialog({ open, onClose, onSubmit, initial, accounts = [] 
         else setForm({ ...blank, currency: defaultCurrency });
     }, [initial, open]);
     const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+    // Si la inversión ya usa una divisa que se desactivó en Configuración (ej. cambiaste
+    // de dispositivo y se perdió del localStorage), igual la mostramos como opción para
+    // no perderla silenciosamente al editar y guardar.
+    const currencyOptions = activeCurrencies.includes(form.currency) ? activeCurrencies : [form.currency, ...activeCurrencies];
 
     return (
         <Dialog open={open} onOpenChange={onClose}>
@@ -455,7 +459,7 @@ function InvestmentFormDialog({ open, onClose, onSubmit, initial, accounts = [] 
                         <div><Label>Moneda</Label>
                             <Select value={form.currency} onValueChange={(v) => set("currency", v)}>
                                 <SelectTrigger><SelectValue /></SelectTrigger>
-                                <SelectContent>{activeCurrencies.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                                <SelectContent>{currencyOptions.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
                             </Select>
                         </div>
                         <div><Label>Fecha de compra</Label><Input type="date" value={form.purchase_date} onChange={(e) => set("purchase_date", e.target.value)} /></div>
