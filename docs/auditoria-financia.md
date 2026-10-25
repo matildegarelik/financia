@@ -26,6 +26,9 @@ Lo que es una **carencia de modelado**, no un bug: no existe forma de registrar 
 
 _Se va actualizando a medida que avanzamos. Última actualización: 2026-10-23._
 
+### Pendiente de investigar (reportado por la usuaria, 2026-10-25)
+- [ ] **Bug de divisa al editar Inversiones/Cuentas (encontrada la causa, falta corregir).** Caso reportado: al editar una inversión de Binance en EUSDT, la divisa quedó guardada como ARS. Causa confirmada en el código: tanto `InvestmentFormDialog` (`src/pages/Investments.jsx:419-491`) como el formulario de `Accounts.jsx` (línea ~443-448) tienen el `<Select>` de moneda poblado **solo** con `activeCurrencies` (las monedas marcadas como activas en Configuración), pero el valor real guardado (`form.currency`) puede ser cualquier divisa que se haya usado antes, activa o no. En `Settings.jsx::removeCurrency` se puede desactivar cualquier moneda activa sin ningún chequeo de si alguna cuenta/inversión la está usando — si "EUSDT" se desactivó en algún momento después de crear esa inversión, su `<Select>` de edición ya no tiene esa opción en la lista y el valor mostrado/guardado puede terminar cayendo a otra divisa (ARS u otra). **Fix propuesto (no implementado todavía):** en ambos formularios, asegurar que la divisa actual del registro (`form.currency`/`initial.currency`) esté siempre en las opciones del `<Select>`, aunque no esté en `activeCurrencies` — agregarla a la lista de opciones si falta, en vez de depender ciegamente de `activeCurrencies`.
+
 ### Bugs y limpieza (sección de "empecemos por los bugs")
 - [x] 2.1 — Presupuestos mezclaban divisas sin convertir antes de sumar (`domain/budgets.js`)
 - [x] 2.2 — Unificar criterio de "categoría cubierta por presupuesto" entre Presupuestos y Proyectado (rollup de subcategorías)
