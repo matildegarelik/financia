@@ -15,6 +15,7 @@ import PageHeader from "@/components/shared/PageHeader";
 import TransactionForm from "@/components/transactions/TransactionForm";
 import { formatCurrency, formatCurrencyCode, formatDate, TRANSACTION_STATUS, TODAY, getTransferDestinationAmount, isRegularIncome, isRegularExpense } from "@/lib/formatters";
 import { computeAccountBalance, getRelatedInstallments } from "@/domain/transactions";
+import { buildDebtPayload } from "@/domain/debts";
 import { useCurrency } from "@/lib/currency-context";
 import { ArrowDownLeft, ArrowUpRight, ArrowLeftRight } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -88,6 +89,8 @@ export default function Transactions() {
     });
     const { data: accounts = [] } = useQuery({ queryKey: ["accounts"], queryFn: () => base44.entities.Account.list() });
     const { data: categories = [] } = useQuery({ queryKey: ["categories"], queryFn: () => base44.entities.Category.list() });
+    const { data: debts = [] } = useQuery({ queryKey: ["third_party_debts"], queryFn: () => base44.entities.ThirdPartyDebt.list() });
+    const { data: debtSettlements = [] } = useQuery({ queryKey: ["debt_settlements"], queryFn: () => base44.entities.DebtSettlement.list() });
 
     const sortedAccounts = useMemo(() => {
         const visible = accounts.filter(a => a.is_visible !== false);
@@ -241,22 +244,47 @@ export default function Transactions() {
 
     const createMut = useMutation({
         mutationFn: async (data) => {
-            const created = await base44.entities.Transaction.create(data);
-            if (data.is_recurring && data.recurring_frequency) {
-                const futures = buildFutureOccurrences(data);
+            const { _debt_person_name, ...txData } = data;
+            const created = await base44.entities.Transaction.create(txData);
+            if (_debt_person_name) {
+                await base44.entities.ThirdPartyDebt.create(buildDebtPayload(created, _debt_person_name));
+            }
+            if (txData.is_recurring && txData.recurring_frequency) {
+                const futures = buildFutureOccurrences(txData);
                 await Promise.all(futures.map((f) => base44.entities.Transaction.create(f)));
             }
             return created;
         },
-        onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["transactions"] }); setShowForm(false); },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ["transactions"] });
+            queryClient.invalidateQueries({ queryKey: ["third_party_debts"] });
+            setShowForm(false);
+        },
     });
     const updateMut = useMutation({
-        mutationFn: ({ id, data }) => base44.entities.Transaction.update(id, data),
+        mutationFn: ({ id, data }) => {
+            const { _debt_person_name, ...txData } = data;
+            return base44.entities.Transaction.update(id, txData);
+        },
         onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["transactions"] }); setEditing(null); },
     });
     const deleteMut = useMutation({
-        mutationFn: (id) => base44.entities.Transaction.delete(id),
-        onSuccess: () => queryClient.invalidateQueries({ queryKey: ["transactions"] }),
+        mutationFn: async (id) => {
+            // Si esta transacción originó un préstamo/pago a un tercero, borramos también
+            // el registro de deuda (y sus devoluciones, por cascada en la base).
+            const originDebt = debts.find((d) => d.origin_transaction_id === id);
+            if (originDebt) await base44.entities.ThirdPartyDebt.delete(originDebt.id);
+            // Si esta transacción es la devolución de una deuda, borramos ese vínculo
+            // para que la deuda vuelva a quedar pendiente por ese monto.
+            const settlement = debtSettlements.find((s) => s.transaction_id === id);
+            if (settlement) await base44.entities.DebtSettlement.delete(settlement.id);
+            await base44.entities.Transaction.delete(id);
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ["transactions"] });
+            queryClient.invalidateQueries({ queryKey: ["third_party_debts"] });
+            queryClient.invalidateQueries({ queryKey: ["debt_settlements"] });
+        },
     });
     const deleteAllMut = useMutation({
         mutationFn: (ids) => Promise.all(ids.map((id) => base44.entities.Transaction.delete(id))),
@@ -567,7 +595,7 @@ export default function Transactions() {
             </Card>
 
             <TransactionForm open={showForm} onClose={() => setShowForm(false)}
-                accounts={accounts} categories={categories}
+                accounts={accounts} categories={categories} debts={debts}
                 onSubmit={(data) => createMut.mutate(data)} />
 
             {editing && (

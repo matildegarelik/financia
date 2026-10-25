@@ -137,11 +137,11 @@ export default function Categories() {
             {typeFiltered.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-8">No hay categorías. Creá la primera.</p>
             ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                <Card className="overflow-hidden">
                     <Reorder.Group as="div" values={localParents} onReorder={handleParentsReorder}
-                        className="contents">
+                        className="divide-y divide-border">
                         {localParents.map((parent, idx) => (
-                            <SortableCategoryCard
+                            <SortableCategoryRow
                                 key={parent.id}
                                 parent={parent}
                                 idx={idx}
@@ -159,17 +159,15 @@ export default function Categories() {
 
                     {/* Orphan children (parent is in another tab) */}
                     {orphans.map((cat) => (
-                        <Card key={cat.id}>
-                            <div className="group flex items-center gap-2 px-3 py-2.5">
-                                <Tag className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                                <span className="text-sm flex-1 truncate">{cat.name}</span>
-                                {cat.is_favorite && <Star className="h-3 w-3 text-chart-3 fill-chart-3 shrink-0" />}
-                                {typeBadge(cat.type)}
-                                <ActionBtns cat={cat} />
-                            </div>
-                        </Card>
+                        <div key={cat.id} className="group flex items-center gap-2 px-3 py-2.5 border-t border-border">
+                            <Tag className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                            <span className="text-sm flex-1 truncate">{cat.name}</span>
+                            {cat.is_favorite && <Star className="h-3 w-3 text-chart-3 fill-chart-3 shrink-0" />}
+                            {typeBadge(cat.type)}
+                            <ActionBtns cat={cat} />
+                        </div>
                     ))}
-                </div>
+                </Card>
             )}
 
             <CategoryFormDialog
@@ -183,52 +181,50 @@ export default function Categories() {
     );
 }
 
-function SortableCategoryCard({ parent, idx, total, byParent, isExpanded, onToggle, typeBadge, ActionBtns, onMoveUp, onMoveDown }) {
+function SortableCategoryRow({ parent, idx, total, byParent, isExpanded, onToggle, typeBadge, ActionBtns, onMoveUp, onMoveDown }) {
     const dragControls = useDragControls();
     const subcategories = byParent[parent.id] || [];
 
     return (
         <Reorder.Item value={parent} as="div" dragControls={dragControls} dragListener={false}>
-            <Card className="overflow-hidden">
-                <div className="group flex items-center gap-1 px-2 py-2.5 hover:bg-muted/50 transition-colors">
-                    <div
-                        onPointerDown={(e) => { e.preventDefault(); dragControls.start(e); }}
-                        className="cursor-grab active:cursor-grabbing touch-none text-muted-foreground/25 hover:text-muted-foreground/60 transition-colors shrink-0 p-0.5"
-                    >
-                        <GripVertical className="h-3.5 w-3.5" />
-                    </div>
-                    <button
-                        type="button"
-                        onClick={() => subcategories.length > 0 && onToggle()}
-                        className="flex items-center gap-2 flex-1 min-w-0 text-left"
-                        style={{ cursor: subcategories.length > 0 ? "pointer" : "default" }}
-                    >
-                        {subcategories.length > 0
-                            ? isExpanded
-                                ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                                : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                            : <Tag className="h-3.5 w-3.5 text-primary shrink-0" />
-                        }
-                        <span className="font-semibold text-sm flex-1 truncate">{parent.name}</span>
-                        {parent.is_favorite && <Star className="h-3 w-3 text-chart-3 fill-chart-3 shrink-0" />}
-                        {typeBadge(parent.type)}
-                    </button>
-                    <ActionBtns cat={parent} idx={idx} total={total} onMoveUp={onMoveUp} onMoveDown={onMoveDown} />
+            <div className="group flex items-center gap-1 px-2 py-2.5 hover:bg-muted/50 transition-colors">
+                <div
+                    onPointerDown={(e) => { e.preventDefault(); dragControls.start(e); }}
+                    className="cursor-grab active:cursor-grabbing touch-none text-muted-foreground/25 hover:text-muted-foreground/60 transition-colors shrink-0 p-0.5"
+                >
+                    <GripVertical className="h-3.5 w-3.5" />
                 </div>
-                {isExpanded && subcategories.length > 0 && (
-                    <div className="border-t divide-y">
-                        {subcategories.map((child) => (
-                            <CategoryChildRow
-                                key={child.id}
-                                category={child}
-                                depth={1}
-                                byParent={byParent}
-                                ActionBtns={ActionBtns}
-                            />
-                        ))}
-                    </div>
-                )}
-            </Card>
+                <button
+                    type="button"
+                    onClick={() => subcategories.length > 0 && onToggle()}
+                    className="flex items-center gap-2 flex-1 min-w-0 text-left"
+                    style={{ cursor: subcategories.length > 0 ? "pointer" : "default" }}
+                >
+                    {subcategories.length > 0
+                        ? isExpanded
+                            ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                            : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                        : <Tag className="h-3.5 w-3.5 text-primary shrink-0" />
+                    }
+                    <span className="font-semibold text-sm flex-1 truncate">{parent.name}</span>
+                    {parent.is_favorite && <Star className="h-3 w-3 text-chart-3 fill-chart-3 shrink-0" />}
+                    {typeBadge(parent.type)}
+                </button>
+                <ActionBtns cat={parent} idx={idx} total={total} onMoveUp={onMoveUp} onMoveDown={onMoveDown} />
+            </div>
+            {isExpanded && subcategories.length > 0 && (
+                <div className="border-t border-border divide-y divide-border">
+                    {subcategories.map((child) => (
+                        <CategoryChildRow
+                            key={child.id}
+                            category={child}
+                            depth={1}
+                            byParent={byParent}
+                            ActionBtns={ActionBtns}
+                        />
+                    ))}
+                </div>
+            )}
         </Reorder.Item>
     );
 }

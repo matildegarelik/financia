@@ -1,8 +1,4 @@
-import { addDaysISO } from "@/lib/formatters";
-
-function isoFromDate(date) {
-    return date.toISOString().split("T")[0];
-}
+import { addDaysISO, getDefaultCreditCardCloseDate, getDefaultCreditCardDueDate } from "@/lib/formatters";
 
 function dateFromMonthKey(monthKey, day = 1) {
     const [year, month] = monthKey.split("-").map(Number);
@@ -19,29 +15,16 @@ export function addMonthsToKey(monthKey, offset) {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
+// Misma lógica que usa formatters.js para cuentas de tarjeta (year/monthIndex en vez de
+// monthKey) — se reutiliza para que el default no pueda desincronizarse entre los dos.
 export function getDefaultCloseDate(monthKey) {
     const [year, month] = monthKey.split("-").map(Number);
-    const d = new Date(year, month, 0, 12);
-    let thursdaysSeen = 0;
-
-    while (d.getMonth() === month - 1) {
-        if (d.getDay() === 4) {
-            thursdaysSeen += 1;
-            if (thursdaysSeen === 2) return isoFromDate(d);
-        }
-        d.setDate(d.getDate() - 1);
-    }
-
-    return isoFromDate(d);
+    return getDefaultCreditCardCloseDate(year, month - 1);
 }
 
 export function getDefaultDueDate(monthKey) {
-    const nextMonthKey = addMonthsToKey(monthKey, 1);
-    const d = dateFromMonthKey(nextMonthKey);
-    const day = d.getDay();
-    const daysUntilMonday = (1 - day + 7) % 7;
-    d.setDate(1 + daysUntilMonday);
-    return isoFromDate(d);
+    const [year, month] = monthKey.split("-").map(Number);
+    return getDefaultCreditCardDueDate(year, month - 1);
 }
 
 export function getStatementMonthKey(statement) {

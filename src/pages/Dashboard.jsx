@@ -19,6 +19,7 @@ import { filterReportTransactions, sumIncomeExpense } from "@/domain/reporting";
 import { useCurrency } from "@/lib/currency-context";
 import { cn } from "@/lib/utils";
 import { format as fnsFormat, startOfMonth, endOfMonth } from "date-fns";
+import { useMaterializeDueSubscriptions } from "@/hooks/useMaterializeDueSubscriptions";
 
 const typeConfig = {
     income: { icon: ArrowDownLeft, label: "Ingreso", color: "text-primary", bg: "bg-primary/10" },
@@ -30,6 +31,7 @@ export default function Dashboard() {
     const navigate = useNavigate();
     const { displayCurrency, convert } = useCurrency();
     const [dashAccTab, setDashAccTab] = useState(null); // null = auto-selecciona primer favorito
+    useMaterializeDueSubscriptions();
 
     const { data: transactions = [], isLoading: loadingTx } = useQuery({
         queryKey: ["transactions"],
@@ -124,6 +126,7 @@ export default function Dashboard() {
             from: monthStart,
             to: monthEnd,
             context: reportingContext,
+            convert,
         });
     };
 

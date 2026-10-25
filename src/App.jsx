@@ -24,6 +24,8 @@ import Analytics from "./pages/Analytics";
 import Settings from "./pages/Settings";
 import Projected from "./pages/Projected";
 import CreditCards from "./pages/CreditCards";
+import Terceros from "./pages/Terceros";
+import Suscripciones from "./pages/Suscripciones";
 
 const AuthenticatedApp = () => {
     const { isLoadingAuth, isLoadingPublicSettings, authError, navigateToLogin } = useAuth();
@@ -61,6 +63,8 @@ const AuthenticatedApp = () => {
                     <Route path="/categories" element={<Categories />} />
                     <Route path="/analytics" element={<Analytics />} />
                     <Route path="/projected" element={<Projected />} />
+                    <Route path="/terceros" element={<Terceros />} />
+                    <Route path="/suscripciones" element={<Suscripciones />} />
                     <Route path="/settings" element={<Settings />} />
                 </Route>
             </Route>

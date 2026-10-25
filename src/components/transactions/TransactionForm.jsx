@@ -11,17 +11,21 @@ import { useCurrency } from "@/lib/currency-context";
 import { Checkbox } from "@/components/ui/checkbox";
 import { getReportingMode } from "@/lib/formatters";
 import { calculateTransferExchangeSnapshot, TRANSFER_CALCULATION_MODES } from "@/lib/transferExchange";
+import { getPersonSuggestions } from "@/domain/debts";
+import { toast } from "sonner";
 
 function makeGroupId() {
     if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
     return `installments-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-export default function TransactionForm({ open, onClose, onSubmit, accounts = [], categories = [], initial }) {
+export default function TransactionForm({ open, onClose, onSubmit, accounts = [], categories = [], initial, debts = [] }) {
     const { activeCurrencies, rates } = useCurrency();
     const [form, setForm] = useState(() => getDefault(initial));
     const [showExtra, setShowExtra] = useState(false);
-    useEffect(() => { setForm(getDefault(initial)); setShowExtra(false); }, [initial, open]);
+    const [debtPersonName, setDebtPersonName] = useState("");
+    useEffect(() => { setForm(getDefault(initial)); setShowExtra(false); setDebtPersonName(""); }, [initial, open]);
+    const personSuggestions = getPersonSuggestions(debts);
 
     function getDefault(init) {
         const defaultAcc = !init
@@ -105,6 +109,10 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
         const effectiveToAmount = isCrossCurrencyTransfer && form.transfer_calculation_mode === TRANSFER_CALCULATION_MODES.RATE && net > 0 && enteredRate > 0
             ? net * enteredRate
             : parseFloat(form.to_amount);
+        if (isCrossCurrencyTransfer && !isLegacyTransfer && (!effectiveToAmount || effectiveToAmount <= 0)) {
+            toast.error("Ingresá el monto recibido en la cuenta destino antes de guardar.");
+            return;
+        }
         const exchangeSnapshot = isLegacyTransfer
             ? {}
             : calculateTransferExchangeSnapshot({
@@ -146,6 +154,7 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
             account_id: form.account_id || null,
             to_account_id: form.to_account_id || null,
             reporting_mode: form.reporting_mode || "normal",
+            _debt_person_name: !initial && form.reporting_mode === "neutral" ? debtPersonName.trim() : null,
         });
     };
 
@@ -352,7 +361,41 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
                         </div>
                     )}
 
-                    {form.type !== "transfer" && (
+                    {form.type !== "transfer" && !initial && (
+                        <div className="space-y-2 rounded-lg border border-border/60 bg-muted/20 p-3">
+                            <label className="flex items-start gap-2 cursor-pointer">
+                                <Checkbox
+                                    checked={form.reporting_mode === "neutral"}
+                                    onCheckedChange={(checked) => {
+                                        set("reporting_mode", checked ? "neutral" : "normal");
+                                        if (!checked) setDebtPersonName("");
+                                    }}
+                                />
+                                <span className="text-sm leading-tight">
+                                    Es un préstamo o pago a/de un tercero
+                                    <span className="block text-xs text-muted-foreground mt-0.5">
+                                        {form.type === "income"
+                                            ? "Te prestaron esta plata o pagaron algo por vos — no cuenta como ingreso real."
+                                            : "Le prestaste esta plata a alguien o pagaste algo por otra persona — no cuenta como gasto real."}
+                                    </span>
+                                </span>
+                            </label>
+                            {form.reporting_mode === "neutral" && (
+                                <div>
+                                    <Label className="text-xs">¿Quién?</Label>
+                                    <Input list="debt-person-suggestions" placeholder="Nombre de la persona"
+                                        value={debtPersonName} onChange={(e) => setDebtPersonName(e.target.value)} required />
+                                    <datalist id="debt-person-suggestions">
+                                        {personSuggestions.map((name) => <option key={name} value={name} />)}
+                                    </datalist>
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                        Vas a poder ver y registrar la devolución desde "Terceros".
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                    {form.type !== "transfer" && initial && form.reporting_mode === "neutral" && (
                         <label className="flex items-start gap-2 rounded-lg border border-border/60 bg-muted/20 p-3 cursor-pointer">
                             <Checkbox
                                 checked={form.reporting_mode === "neutral"}
@@ -361,7 +404,7 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
                             <span className="text-sm leading-tight">
                                 No contar en ingresos/gastos
                                 <span className="block text-xs text-muted-foreground mt-0.5">
-                                    Afecta saldos y tarjetas, pero queda fuera de reportes.
+                                    Esta transacción ya está marcada como neutral. Si es un préstamo vinculado a un tercero, administrá su devolución desde "Terceros".
                                 </span>
                             </span>
                         </label>

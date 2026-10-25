@@ -206,20 +206,10 @@ export default function Analytics() {
     const avgSaving = data.length ? data.reduce((s, d) => s + d.saving, 0) / data.length : 0;
 
     // Top categories
-    const byCat = useMemo(() => {
-        const map = {};
-        filteredTransactions.filter(isRegularExpense).forEach((t) => {
-            const k = t.category_name || "Sin categoría";
-            map[k] = (map[k] || 0) + convert(t.amount || 0, t.currency || "ARS");
-        });
-        filteredTransactions
-            .filter((t) => t.type === "transfer" && affectsReports(t))
-            .forEach((t) => {
-                const diff = getTransferDifference(t, convert);
-                if (diff < 0) map["Diferencia de transferencia"] = (map["Diferencia de transferencia"] || 0) + Math.abs(diff);
-            });
-        return getTopExpenseCategories(filteredTransactions, convert, { limit: 8, includeTransferDifferences: true });
-    }, [filteredTransactions, convert]);
+    const byCat = useMemo(() =>
+        getTopExpenseCategories(filteredTransactions, convert, { limit: 8, includeTransferDifferences: true }),
+        [filteredTransactions, convert]
+    );
 
     const paymentMethodData = useMemo(() => {
         return getPaymentMethodData(filteredTransactions, accounts, convert);

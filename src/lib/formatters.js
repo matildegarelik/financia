@@ -142,7 +142,7 @@ function isoFromParts(year, monthIndex, day) {
     return d.toISOString().split("T")[0];
 }
 
-function getDefaultCreditCardCloseDate(year, monthIndex) {
+export function getDefaultCreditCardCloseDate(year, monthIndex) {
     const d = new Date(year, monthIndex + 1, 0, 12);
     let thursdaysSeen = 0;
 
@@ -157,7 +157,7 @@ function getDefaultCreditCardCloseDate(year, monthIndex) {
     return d.toISOString().split("T")[0];
 }
 
-function getDefaultCreditCardDueDate(year, monthIndex) {
+export function getDefaultCreditCardDueDate(year, monthIndex) {
     const d = new Date(year, monthIndex + 1, 1, 12);
     const day = d.getDay();
     const daysUntilMonday = (1 - day + 7) % 7;
@@ -228,18 +228,6 @@ export function getReportingDate(tx, { accounts = [], statements = [] } = {}) {
     if (statement?.due_date) return statement.due_date;
 
     return getCreditCardStatementRange(account, tx.date).due_date || tx.date;
-}
-
-export function transactionMatchesStatement(tx, statement) {
-    const date = tx.date;
-    return Boolean(
-        tx.type === "expense" &&
-        !isCreditCardPayment(tx) &&
-        date &&
-        date >= statement.period_start &&
-        date <= statement.period_end &&
-        tx.account_id === statement.account_id
-    );
 }
 
 export function getTransferDestinationAmount(tx, destinationCurrency) {

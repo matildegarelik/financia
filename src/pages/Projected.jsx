@@ -11,8 +11,8 @@ import PageHeader from "@/components/shared/PageHeader";
 import CurrencySelector from "@/components/shared/CurrencySelector";
 import TransactionFormProjected from "@/components/transactions/TransactionFormProjected";
 import { formatCurrencyCode, formatDate, getCurrentMonth, getMonthLabel, getReportingDate, getTransferDestinationAmount, isRegularExpense, isRegularIncome, getTransferDifference, affectsReports } from "@/lib/formatters";
-import { computeAccountBalance, computeTotalSavings } from "@/domain/transactions";
-import { getUnplannedExpenses } from "@/domain/budgets";
+import { computeTotalSavings } from "@/domain/transactions";
+import { getMatchingCategoryIds, getUnplannedExpenses } from "@/domain/budgets";
 import { cn } from "@/lib/utils";
 import { useCurrency } from "@/lib/currency-context";
 import { toast } from "sonner";
@@ -137,8 +137,12 @@ export default function Projected() {
         const monthBudgets = budgets.filter((b) => b.month === yyyymm);
         const incomeBudgets = monthBudgets.filter((b) => categories.find((c) => c.id === b.category_id)?.type === "income");
         const expenseBudgets = monthBudgets.filter((b) => categories.find((c) => c.id === b.category_id)?.type === "expense");
-        const coveredIncCatIds = new Set(incomeBudgets.map((b) => b.category_id).filter(Boolean));
-        const coveredExpCatIds = new Set(expenseBudgets.map((b) => b.category_id).filter(Boolean));
+        // Igual que domain/budgets.js: una categoría padre con presupuesto cubre a sus subcategorías,
+        // para no contar esos gastos dos veces (una vez en el presupuesto, otra como "one-off").
+        const coveredIncCatIds = new Set();
+        incomeBudgets.forEach((b) => getMatchingCategoryIds(b, categories)?.forEach((id) => coveredIncCatIds.add(id)));
+        const coveredExpCatIds = new Set();
+        expenseBudgets.forEach((b) => getMatchingCategoryIds(b, categories)?.forEach((id) => coveredExpCatIds.add(id)));
 
         // Transacciones proyectadas: todas (para el listado), solo one-offs (para los totales)
         const projected = transactions.filter((t) => t.status === "projected" && txMonth(t) === yyyymm);
@@ -177,12 +181,14 @@ export default function Projected() {
             realIncomeByC: byCurrency(realIncomeTxs),
             realExpenseByC: byCurrency(realExpenseTxs),
             incomeBudgets, expenseBudgets,
+            coveredIncCatIds, coveredExpCatIds,
         };
     }
 
     const monthData = useMemo(() => computeMonth(selectedMonth), [transactions, selectedMonth, convert, budgets, categories, accounts, statements]);
     const { projected, projIncome, projExpense, projSavings, realIncome, realExpense, realSavings, realTransferExpense,
-        projIncomeByC, projExpenseByC, realIncomeByC, realExpenseByC, incomeBudgets, expenseBudgets } = monthData;
+        projIncomeByC, projExpenseByC, realIncomeByC, realExpenseByC, incomeBudgets, expenseBudgets,
+        coveredIncCatIds, coveredExpCatIds } = monthData;
 
     const diffIncome = realIncome - projIncome;
     const diffExpense = realExpense - projExpense;
@@ -502,41 +508,6 @@ export default function Projected() {
                         </div>
                     )}
 
-                    {false && transferDifferences.length > 0 && (
-                        <Card className="border-amber-500/30">
-                            <CardContent className="p-3 space-y-2">
-                                <div className="flex items-center justify-between gap-3">
-                                    <div>
-                                        <p className="text-sm font-semibold">Diferencias de transferencias</p>
-                                        <p className="text-xs text-muted-foreground">Impactan el total, pero no son gastos categorizados.</p>
-                                    </div>
-                                    <span className="text-sm font-bold text-destructive shrink-0">
-                                        {formatCurrencyCode(transferDifferences.reduce((sum, item) => sum + item.difference, 0), displayCurrency)}
-                                    </span>
-                                </div>
-                                <div className="divide-y divide-border rounded-md border border-border/60">
-                                    {transferDifferences.map(({ tx, difference }) => {
-                                        const destinationCurrency = tx.to_currency || tx.currency || "ARS";
-                                        const destinationAmount = getTransferDestinationAmount(tx, destinationCurrency);
-                                        return (
-                                            <div key={tx.id} className="flex items-center justify-between gap-3 px-3 py-2 text-xs">
-                                                <div className="min-w-0">
-                                                    <p className="font-medium truncate">{tx.description || "Transferencia"}</p>
-                                                    <p className="text-muted-foreground truncate">
-                                                        {formatCurrencyCode(tx.amount, tx.currency || "ARS")} → {formatCurrencyCode(destinationAmount, destinationCurrency)}
-                                                    </p>
-                                                </div>
-                                                <span className={cn("font-semibold shrink-0", difference < 0 ? "text-destructive" : "text-primary")}>
-                                                    {difference >= 0 ? "+" : ""}{formatCurrencyCode(difference, displayCurrency)}
-                                                </span>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            </CardContent>
-                        </Card>
-                    )}
-
                     {/* Resumen de presupuestos del mes */}
                     {(incomeBudgets.length > 0 || expenseBudgets.length > 0) && (
                         <div>
@@ -632,12 +603,21 @@ export default function Projected() {
                         ) : (
                             <Card className="overflow-hidden">
                                 <div className="divide-y divide-border">
-                                    {projected.map((tx) => (
+                                    {projected.map((tx) => {
+                                        const isCoveredByBudget = tx.type === "income"
+                                            ? coveredIncCatIds.has(tx.category_id)
+                                            : coveredExpCatIds.has(tx.category_id);
+                                        return (
                                         <div key={tx.id} className="flex items-center gap-3 p-3 hover:bg-muted/20 cursor-pointer" onClick={() => setEditing(tx)}>
                                             <div className="flex-1 min-w-0">
                                                 <div className="flex items-center gap-2 flex-wrap">
                                                     <p className="text-sm font-medium truncate">{tx.description || (tx.type === "income" ? "Ingreso" : "Gasto")}</p>
                                                     {tx.project_name && <Badge variant="secondary" className="text-xs">{tx.project_name}</Badge>}
+                                                    {isCoveredByBudget && (
+                                                        <Badge variant="outline" className="text-xs text-amber-600 border-amber-500/40">
+                                                            Ya cubierta por un presupuesto
+                                                        </Badge>
+                                                    )}
                                                 </div>
                                                 <p className="text-xs text-muted-foreground">{tx.category_name && `${tx.category_name} · `}{formatDate(tx.date)}{tx.client_name && ` · ${tx.client_name}`}</p>
                                             </div>
@@ -651,7 +631,8 @@ export default function Projected() {
                                                 </Button>
                                             </div>
                                         </div>
-                                    ))}
+                                        );
+                                    })}
                                 </div>
                             </Card>
                         )}

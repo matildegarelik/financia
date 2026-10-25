@@ -58,4 +58,7 @@ export const entities = {
     Investment: createEntityClient('investments'),
     ExchangeRate: createEntityClient('exchange_rates'),
     CreditCardStatement: createEntityClient('credit_card_statements'),
+    ThirdPartyDebt: createEntityClient('third_party_debts'),
+    DebtSettlement: createEntityClient('debt_settlements'),
+    Subscription: createEntityClient('subscriptions'),
 };

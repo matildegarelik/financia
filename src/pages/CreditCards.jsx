@@ -16,6 +16,7 @@ import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { TODAY, formatCurrencyCode, formatDate } from "@/lib/formatters";
 import { computeAccountBalance } from "@/domain/transactions";
+import { useCurrency } from "@/lib/currency-context";
 import { toast } from "sonner";
 import {
     buildCreditCardStatement,
@@ -52,6 +53,7 @@ function getDisplayedInstallment(tx, transactions) {
 
 export default function CreditCards() {
     const queryClient = useQueryClient();
+    const { convert } = useCurrency();
     const [editing, setEditing] = useState(null);
     const [selectedCardId, setSelectedCardId] = useState("");
 
@@ -112,14 +114,22 @@ export default function CreditCards() {
     const payStatementMut = useMutation({
         mutationFn: async ({ statement, paymentAccount }) => {
             if (!paymentAccount) throw new Error("Selecciona una cuenta de pago.");
+            const statementCurrency = statement.currency || "ARS";
+            const paymentCurrency = paymentAccount.currency || statementCurrency;
+            const isCrossCurrency = paymentCurrency !== statementCurrency;
+            // El monto que sale de la cuenta de pago tiene que estar en SU divisa, no en la
+            // de la tarjeta — antes se guardaba el número de la tarjeta sin convertir.
+            const paymentAmount = isCrossCurrency
+                ? convert(statement.total_amount, statementCurrency, paymentCurrency)
+                : statement.total_amount;
             const payment = await base44.entities.Transaction.create({
                 type: "transfer",
                 status: "confirmed",
                 date: TODAY,
-                amount: statement.total_amount,
-                currency: paymentAccount.currency || statement.currency || "ARS",
-                to_amount: (paymentAccount.currency || statement.currency || "ARS") === (statement.currency || "ARS") ? null : statement.total_amount,
-                to_currency: (paymentAccount.currency || statement.currency || "ARS") === (statement.currency || "ARS") ? null : statement.currency || "ARS",
+                amount: paymentAmount,
+                currency: paymentCurrency,
+                to_amount: isCrossCurrency ? statement.total_amount : null,
+                to_currency: isCrossCurrency ? statementCurrency : null,
                 account_id: paymentAccount.id,
                 account_name: paymentAccount.name || "",
                 to_account_id: statement.account_id,

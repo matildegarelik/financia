@@ -50,9 +50,10 @@ export function transactionMatchesBudget(tx, budget, { categories = [], from, to
 }
 
 export function getBudgetProgress(budget, transactions = [], options = {}) {
+    const convert = options.convert || ((amount) => amount);
     return transactions
         .filter((tx) => transactionMatchesBudget(tx, budget, options))
-        .reduce((sum, tx) => sum + (tx.amount || 0), 0);
+        .reduce((sum, tx) => sum + convert(tx.amount || 0, tx.currency || "ARS", budget.currency || "ARS"), 0);
 }
 
 export function sumConvertedBudgetAmounts(budgets = [], convert = (amount) => amount) {

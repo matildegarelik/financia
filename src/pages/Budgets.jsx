@@ -66,6 +66,7 @@ export default function Budgets() {
         to: monthEnd,
         includeFuture: true,
         context: { accounts, statements },
+        convert,
     };
     const getProgress = (budget) => getBudgetProgress(budget, transactions, budgetProgressOptions);
 
@@ -165,42 +166,6 @@ export default function Budgets() {
                     </CardContent>
                 </Card>
             )}
-
-            {false && (
-               <Card className="border-destructive/30">
-                   <CardContent className="p-4 space-y-3">
-                       <div className="flex items-start gap-3">
-                           <AlertTriangle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
-                           <div className="min-w-0">
-                               <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-                                   <h2 className="font-semibold">Gastos no planificados</h2>
-                                   <span className="font-semibold text-destructive">
-                                       {formatCurrencyCode(unplannedTotal, displayCurrency)}
-                                   </span>
-                               </div>
-                               <p className="text-xs text-muted-foreground mt-0.5">
-                                   Gastos reales de {format(currentMonth, "MMMM", { locale: es })} sin presupuesto ni proyección equivalente.
-                               </p>
-                           </div>
-                       </div>
-                       <div className="divide-y divide-border rounded-md border border-border/60">
-                           {unplannedExpenses.map((tx) => (
-                               <div key={tx.id} className="flex items-center justify-between gap-3 px-3 py-2.5 text-sm">
-                                   <div className="min-w-0">
-                                       <p className="font-medium truncate">{tx.description || "Gasto sin descripción"}</p>
-                                       <p className="text-xs text-muted-foreground truncate">
-                                           {formatDate(tx.date)} · {tx.category_name || "Sin categoría"}
-                                       </p>
-                                   </div>
-                                   <span className="font-semibold text-destructive shrink-0">
-                                       {formatCurrencyCode(tx.amount, tx.currency || "ARS")}
-                                   </span>
-                               </div>
-                           ))}
-                       </div>
-                   </CardContent>
-               </Card>
-           )}
 
             {budgets.length === 0 ? (
                 <div className="text-center py-12 text-muted-foreground">
