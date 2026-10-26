@@ -246,38 +246,32 @@ export default function Projected() {
         const thisYear = String(new Date().getFullYear());
         if (!years.includes(thisYear)) years.push(thisYear);
         return years.map((year) => {
-            const txsOfYear = transactions.filter((t) => {
-                const date = t.status === "projected" ? t.date : getReportingDate(t, reportingContext);
-                return date?.startsWith(year);
-            });
-            const projTxs = txsOfYear.filter((t) => t.status === "projected");
-            const realTxs = txsOfYear.filter((t) => t.status !== "projected");
-            const projInc = projTxs.filter(isRegularIncome).reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0);
-            const projExp = projTxs.filter(isRegularExpense).reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0);
-            const transferDiff = realTxs.filter((t) => t.type === "transfer" && affectsReports(t)).reduce((s, t) => s + getTransferDifference(t, convert), 0);
-            const realInc = realTxs.filter(isRegularIncome).reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0) + Math.max(transferDiff, 0);
-            const realExp = realTxs.filter(isRegularExpense).reduce((s, t) => s + convert(t.amount || 0, t.currency || "ARS"), 0) + Math.max(-transferDiff, 0);
+            // Mismo cálculo mensual que el resto de la pantalla (computeMonth, que ya
+            // incluye presupuestos) sumado a lo largo de los 12 meses — antes esto solo
+            // sumaba transacciones proyectadas sueltas, por eso un año futuro sin
+            // proyecciones individuales (pero con presupuestos) se veía vacío.
+            const monthsData = Array.from({ length: 12 }, (_, i) => computeMonth(`${year}-${String(i + 1).padStart(2, "0")}`));
             const isCurrent = year === thisYear;
-            // For current year: blend real (past months) + projected (current month onwards)
+            const isFuture = year > thisYear;
+            const realIncome = monthsData.reduce((s, m) => s + m.realIncome, 0);
+            const realExpense = monthsData.reduce((s, m) => s + m.realExpense, 0);
+            const projIncome = monthsData.reduce((s, m) => s + m.projIncome, 0);
+            const projExpense = monthsData.reduce((s, m) => s + m.projExpense, 0);
+            const realSavings = realIncome - realExpense;
+            const projSavings = projIncome - projExpense;
+            // Año en curso: pasado = real, mes actual en adelante = proyectado (igual que antes).
             const blendedSavings = isCurrent
-                ? txsOfYear.filter((t) => {
-                    const mo = t.status === "projected" ? t.date?.slice(0, 7) : txReportingMonth(t, reportingContext);
-                    if (!mo) return false;
-                    return mo < currentMonth ? t.status !== "projected" : t.status === "projected";
-                }).reduce((s, t) => {
-                    const amt = convert(t.amount || 0, t.currency || "ARS");
-                    if (isRegularIncome(t)) return s + amt;
-                    if (isRegularExpense(t)) return s - amt;
-                    if (t.type === "transfer" && affectsReports(t)) return s + getTransferDifference(t, convert);
-                    return s;
+                ? monthsData.reduce((s, m, i) => {
+                    const mk = `${year}-${String(i + 1).padStart(2, "0")}`;
+                    return s + (mk < currentMonth ? m.realSavings : m.projSavings);
                 }, 0)
-                : realInc - realExp;
+                : realSavings;
             return {
                 year,
-                projIncome: projInc, projExpense: projExp, projSavings: projInc - projExp,
-                realIncome: realInc, realExpense: realExp, realSavings: realInc - realExp,
+                projIncome, projExpense, projSavings,
+                realIncome, realExpense, realSavings,
                 blendedSavings,
-                isCurrent,
+                isCurrent, isFuture,
             };
         });
     }, [transactions, convert, budgets, categories, accounts, statements]);
@@ -766,12 +760,11 @@ export default function Projected() {
                             <span></span>
                         </div>
                         <div className="divide-y divide-border">
-                            {allYears.map(({ year, realIncome, realExpense, realSavings, blendedSavings, isCurrent }) => {
+                            {allYears.map(({ year, realIncome, realExpense, realSavings, projIncome, projExpense, projSavings, blendedSavings, isCurrent, isFuture: isYearFuture }) => {
                                 const isExpanded = expandedYears.has(year);
-                                const hasData = realIncome > 0 || realExpense > 0;
+                                const hasData = realIncome > 0 || realExpense > 0 || projIncome > 0 || projExpense > 0;
                                 const accBalance = getBalanceAtMonth(`${year}-12`);
-                                const isYearFuture = String(year) > String(new Date().getFullYear());
-                                const displaySavings = isCurrent ? blendedSavings : realSavings;
+                                const displaySavings = isCurrent ? blendedSavings : isYearFuture ? projSavings : realSavings;
                                 return (
                                     <div key={year} className={cn(isCurrent && "bg-primary/5")}>
                                         <div className="grid grid-cols-[3rem_1fr_1fr_1.25rem] gap-2 items-center px-4 py-3 cursor-pointer hover:bg-muted/20 select-none"
@@ -782,10 +775,10 @@ export default function Projected() {
                                             </div>
                                             <span className={cn("text-right text-sm font-semibold",
                                                 !hasData ? "text-muted-foreground/30"
-                                                    : isCurrent ? "text-muted-foreground/70 italic"
+                                                    : (isCurrent || isYearFuture) ? "text-muted-foreground/70 italic"
                                                         : displaySavings >= 0 ? "text-primary" : "text-destructive")}>
                                                 {hasData
-                                                    ? isCurrent ? `≈ ${formatCurrencyCode(displaySavings, displayCurrency)}` : formatCurrencyCode(displaySavings, displayCurrency)
+                                                    ? (isCurrent || isYearFuture) ? `≈ ${formatCurrencyCode(displaySavings, displayCurrency)}` : formatCurrencyCode(displaySavings, displayCurrency)
                                                     : "—"}
                                             </span>
                                             <span className={cn("text-right text-sm font-bold",

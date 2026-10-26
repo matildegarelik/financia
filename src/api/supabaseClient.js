@@ -61,4 +61,5 @@ export const entities = {
     ThirdPartyDebt: createEntityClient('third_party_debts'),
     DebtSettlement: createEntityClient('debt_settlements'),
     Subscription: createEntityClient('subscriptions'),
+    WishlistItem: createEntityClient('wishlist_items'),
 };

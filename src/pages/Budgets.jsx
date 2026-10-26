@@ -21,6 +21,7 @@ import {
     sumConvertedBudgetAmounts,
     sumConvertedBudgetProgress,
 } from "@/domain/budgets";
+import { buildCategoryTree } from "@/domain/categories";
 import { useCurrency } from "@/lib/currency-context";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
@@ -344,16 +345,7 @@ function BudgetFormDialog({ open, onClose, onSubmit, initial, categories, monthK
         set("category_name", cat?.name || "");
     };
 
-    // Build ordered list: parents first (by sort_order), then their children indented
-    const parents = [...categories.filter((c) => !c.parent_category)].sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999));
-    const children = [...categories.filter((c) => !!c.parent_category)].sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999));
-    const orderedCats = [];
-    parents.forEach((p) => {
-        orderedCats.push({ ...p, isParent: true });
-        children.filter((c) => c.parent_category === p.id).forEach((c) => orderedCats.push({ ...c, isParent: false }));
-    });
-    // Orphan children (parent not found in list)
-    children.filter((c) => !parents.find((p) => p.id === c.parent_category)).forEach((c) => orderedCats.push({ ...c, isParent: false }));
+    const orderedCats = buildCategoryTree(categories);
 
     return (
         <Dialog open={open} onOpenChange={onClose}>

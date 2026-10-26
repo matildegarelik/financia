@@ -15,6 +15,7 @@ import { formatCurrencyCode, formatDate, TODAY } from "@/lib/formatters";
 import { Checkbox } from "@/components/ui/checkbox";
 import { FREQUENCY_LABEL, getNextChargeDate, toMonthlyEquivalent } from "@/domain/subscriptions";
 import { getPersonSuggestions } from "@/domain/debts";
+import { buildCategoryTree } from "@/domain/categories";
 import { useCurrency } from "@/lib/currency-context";
 import { useMaterializeDueSubscriptions } from "@/hooks/useMaterializeDueSubscriptions";
 
@@ -148,7 +149,7 @@ export default function Suscripciones() {
 }
 
 function SubscriptionForm({ open, initial, accounts, categories, activeCurrencies, debts, onClose, onSubmit }) {
-    const expenseCategories = categories.filter((c) => c.type === "expense");
+    const orderedExpenseCats = buildCategoryTree(categories.filter((c) => c.type === "expense"));
     const personSuggestions = getPersonSuggestions(debts);
     const [form, setForm] = useState(() => initial ? {
         ...initial,
@@ -239,8 +240,8 @@ function SubscriptionForm({ open, initial, accounts, categories, activeCurrencie
                                 <SelectTrigger><SelectValue /></SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="none"><span className="text-muted-foreground">Sin categoría</span></SelectItem>
-                                    {expenseCategories.map((c) => (
-                                        <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                                    {orderedExpenseCats.map((c) => (
+                                        <SelectItem key={c.id} value={c.id}>{c.isParent ? c.name : `  ↳ ${c.name}`}</SelectItem>
                                     ))}
                                 </SelectContent>
                             </Select>

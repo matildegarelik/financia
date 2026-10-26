@@ -1,6 +1,6 @@
-# Auditoría Financia — hallazgos y propuesta de diseño (2026-10-23)
+# Auditoría Financia — hallazgos y propuesta de diseño (2026-10-23, última actualización 2026-10-25)
 
-Relevamiento completo de: multi-divisa, presupuestos, proyecciones, transferencias, tarjetas de crédito, balances, y el caso de préstamos/pagos a terceros. Incluye diseño de las dos features nuevas pedidas (Terceros/Deudas y Suscripciones).
+Relevamiento completo de: multi-divisa, presupuestos, proyecciones, transferencias, tarjetas de crédito, balances, y el caso de préstamos/pagos a terceros. Incluye diseño de las features nuevas pedidas (Terceros/Deudas, Suscripciones, Wishlist) y rediseños de UI (Categorías, Tarjetas de crédito).
 
 Ver también `docs/multidivisas-analisis.md` (análisis previo sobre tasas históricas, sigue sin implementarse).
 
@@ -29,7 +29,12 @@ _Se va actualizando a medida que avanzamos. Última actualización: 2026-10-23._
 ### Resueltos recientemente (2026-10-25)
 - [x] **Bug de divisa al editar Inversiones/Cuentas/Presupuestos/Suscripciones/Proyectado.** Caso reportado: al editar una inversión de Binance en EUSDT, la divisa quedó guardada como ARS. Causa confirmada: el `<Select>` de moneda en esos 5 formularios estaba poblado **solo** con `activeCurrencies` (las monedas activas en Configuración, persistidas en `localStorage` — ver hallazgo 1.5). `Settings.jsx::removeCurrency` permite desactivar cualquier moneda sin chequear si algo la usa, y además `activeCurrencies` vive solo en el navegador: cambiar de dispositivo, limpiar el storage, o simplemente desactivarla en Configuración hace que esa divisa desaparezca de la lista de opciones, y al reabrir y guardar el registro se pierde silenciosamente. **Arreglado** en `Investments.jsx`, `Accounts.jsx`, `Budgets.jsx`, `Suscripciones.jsx` y `TransactionFormProjected.jsx`: cada formulario ahora incluye la divisa actual del registro en las opciones del `<Select>` aunque no esté en `activeCurrencies`, así nunca se pierde al editar y guardar.
 - [ ] **Dato ya corrompido a recuperar manualmente:** la inversión de Binance específica que se reportó quedó guardada como ARS antes de este fix — hay que volver a agregar "EUSDT" como divisa custom en Configuración y re-seleccionarla en esa inversión (los montos numéricos no cambiaron, solo la etiqueta de moneda estaba mal). El código nuevo previene que vuelva a pasar, pero no puede adivinar retroactivamente cuál era la divisa correcta de un dato ya sobrescrito.
+- [ ] **A decidir — gráficos de Analytics poco útiles** (ver sección 13 para las alternativas propuestas, todavía sin implementar a propósito — la usuaria quiere pensarlas antes).
 - [x] **3.5 — Transferencias: ya no se elige modo ni se ingresa tasa a mano.** Ahora siempre se ingresa monto origen + monto destino, y la tasa efectiva y la diferencia contra la tasa de referencia se calculan solas (ver sección 3.5 actualizada).
+- [x] **UI de Tarjetas de crédito rediseñada** (sección 8) — ver detalle ahí.
+- [x] **Desplegable de categorías confuso en páginas nuevas (y duplicado en código en 3 formularios viejos).** `Suscripciones.jsx` mostraba las categorías en una lista plana sin jerarquía (al revés de Transacciones, que marca categoría padre vs. subcategoría con "↳"). Al revisar, encontré que la lógica de armar esa jerarquía estaba **copiada 3 veces** (`TransactionForm.jsx`, `TransactionFormProjected.jsx`, `Budgets.jsx`), cada copia ligeramente distinta. Se extrajo a `domain/categories.js::buildCategoryTree` (única fuente de verdad) y se usa en los 4 lugares, incluido el que faltaba en Suscripciones.
+- [x] **Bug en `Projected.jsx` → vista "Resumen" → columna "Del año".** Para un año futuro, esa columna mostraba "—" (nada) porque solo sumaba transacciones proyectadas sueltas, nunca los presupuestos — mientras que la columna "Ahorro total" (al lado) sí incluye presupuestos (usa `computeMonth` acumulado mes a mes) y mostraba un número. Quedaba inconsistente: una columna vacía al lado de otra con datos, para el mismo año. **Arreglado:** "Del año" ahora usa el mismo cálculo mensual (`computeMonth`, que ya incluye presupuestos) sumado a lo largo de los 12 meses, igual que ya hacía "Ahorro total". Para años futuros se muestra en color neutro con "≈" (no verde/rojo, porque no es confirmado) — mismo criterio visual que ya usaba el año en curso.
+- [x] **Nueva página Wishlist** (sección 12) — lista simple de cosas para comprar con precio y categoría de texto libre, sin relación con el resto de la app. **Falta aplicar la migración SQL manualmente** (ver 12.1).
 
 ### Bugs y limpieza (sección de "empecemos por los bugs")
 - [x] 2.1 — Presupuestos mezclaban divisas sin convertir antes de sumar (`domain/budgets.js`)
@@ -295,6 +300,42 @@ Esto es la causa de fondo de la sensación de que "hay cosas que no cuadran": el
 
 ---
 
+## 12. Wishlist (implementado)
+
+Pedido nuevo (2026-10-25): una pantalla sin relación con el resto de la app — solo anotar cosas para comprar con precio y categoría, poder marcarlas como ya compradas (se ocultan por defecto) y filtrar para verlas también.
+
+- Tabla nueva `wishlist_items` (`supabase/migrations/20261025_012_wishlist.sql`): `name`, `category`, `price`, `currency`, `is_purchased`, `purchased_at`, `notes`, `sort_order`.
+- **Categoría — decisión explícita de diseño:** no hay una tabla de categorías propia ni se reutiliza la entidad `Category` del resto de la app. `category` es una columna de texto simple en `wishlist_items`; el conjunto de categorías "existentes" se deriva en el cliente con un distinct sobre los items ya cargados (`[...new Set(items.map(i => i.category))]`), sin ningún query SQL especial. En la UI se usa como si fuera un conjunto cerrado: pestañas por categoría arriba de la lista (+ "Todas"), y en el formulario de alta/edición un `<Select>` con las categorías existentes + opción "+ Nueva categoría" que revela un input de texto para escribir una que no exista todavía. Al editar un item, su categoría actual siempre aparece en el selector (por construcción, viene de los mismos items de los que se derivan las pestañas) — no hay riesgo de que se "pierda" como pasaba con las divisas desactivadas.
+- Pantalla **"Wishlist"** (menú lateral): alta/edición, tarjeta con el total estimado de lo pendiente (convertido a la divisa de display), checkbox "Mostrar compradas" (default apagado — por defecto solo se ven las pendientes), pestañas de categoría, botón para marcar/desmarcar comprada, eliminar.
+
+### 12.1 Pendiente antes de poder usarlo
+
+- **Aplicar la migración SQL manualmente**: `supabase/migrations/20261025_012_wishlist.sql` crea la tabla `wishlist_items`. Mismo procedimiento que las migraciones anteriores (SQL Editor de Supabase). **Importante:** antes de correrla, confirmá en el SQL Editor que no tira ningún error (como pasó con la de Suscripciones, que quedó sin aplicar la primera vez sin que quedara claro por qué) — si tira error, pegame el mensaje exacto.
+
+## 13. Analytics — gráficos poco útiles, propuestas a decidir (no implementado a propósito)
+
+Pedido de la usuaria (2026-10-25), todavía sin implementar porque quiere pensarlo antes de elegir:
+
+**Problema 1 — "Ingresos vs Gastos por día" no tiene escala útil.** Cuando se mira un rango que agrupa por día (`groupByDay`, rangos ≤ ~62 días), los días de cobro de sueldo y los días de pago de tarjeta generan picos enormes comparados con el resto de los días en ~0 — la escala del gráfico queda dominada por esos dos picos y el resto se ve plano/inútil.
+
+**Problema 2 — "Ingreso promedio" / "Gasto promedio" por día es poco relevante** cuando se está mirando un mes específico (sí tiene sentido cuando el rango es de varios meses, ahí promedia bien).
+
+**Problema 3 — "Ahorro acumulado"** (línea que suma el ahorro de todo el rango visible) no es lo que la usuaria quiere ver — prefiere ver el neto ahorrado *de ese mes* o *por cada mes*, no un acumulado corriendo.
+
+**Alternativas propuestas (a elegir, no son excluyentes entre sí):**
+
+| # | Propuesta | Qué resuelve |
+|---|---|---|
+| A | Reemplazar "Ahorro acumulado" por un gráfico de **barras de ahorro neto por mes** (una barra por mes, no una línea acumulada) | Responde directamente al problema 3 — "cuánto ahorré *este* mes", no un corrido histórico. |
+| B | Cuando el rango es un solo mes (`groupByDay`), **ocultar el gráfico diario de ingresos/gastos** y mostrarlo solo cuando el rango abarca varios meses (ahí sí tiene escala razonable) | Resuelve el problema 1 sin necesidad de inventar un gráfico nuevo — simplemente no se muestra donde no tiene sentido. |
+| C | En su lugar, para un mes específico, mostrar un **gráfico de "ritmo de gasto"**: acumulado de gasto real día por día contra una línea de referencia del presupuesto repartido uniformemente en el mes (día 1 = presupuesto/30, día 15 = presupuesto/2, etc.) — responde "¿estoy gastando más rápido o más lento de lo que planeé este mes?" | Da algo *más* útil que el gráfico diario actual para la vista de un mes, en vez de solo ocultar algo. |
+| D | Reemplazar "Ingreso/Gasto promedio por día" por **promedio por semana** cuando el rango es un mes (menos sensible a que un solo día de cobro/pago de tarjeta domine el número) | Resuelve el problema 2 sin sacar el dato, solo cambia la unidad de tiempo. |
+| E | Mostrar en la vista de un mes específico, en vez de (o adicional a) los promedios diarios: **top categorías de gasto de ese mes** y **comparación contra el mes anterior** (¿gasté más o menos que el mes pasado, y en qué categoría cambió más?) | Da contexto "relevante para ese mes" que hoy no existe en ningún lado de Analytics para un mes individual — distinto de lo que ya hace la sección de cumplimiento de presupuesto (que compara contra lo presupuestado, no contra el mes anterior). |
+
+**Mi recomendación si tuviera que elegir una combinación:** A (barras de ahorro neto mensual, siempre) + B (ocultar el gráfico diario cuando el rango es un mes) + E (categorías del mes + comparación contra el mes anterior, para llenar el hueco que deja ocultar el gráfico diario). D es un complemento fácil y barato de sumar sea cual sea el resto. C es la más vistosa pero también la que más trabajo lleva (requiere repartir el presupuesto día a día) — la dejaría para una segunda vuelta si las otras no alcanzan.
+
+---
+
 ## Plan de acción sugerido
 
 1. ✅ **Hecho** — Bugs acotados de alto impacto, bajo riesgo: 2.1 (conversión de divisa en presupuestos), 2.4 (código muerto en Budgets.jsx), 4.2 (código muerto en formatters.js), eliminación de `BudgetOverview.jsx`.
@@ -306,7 +347,11 @@ Esto es la causa de fondo de la sensación de que "hay cosas que no cuadran": el
 7. ✅ **Hecho** — Categorías en lista/tabla jerárquica en vez de grilla de tarjetas (sección 10).
 8. ✅ **Hecho** — Estadísticas de cumplimiento histórico de presupuesto (sección 9).
 9. ✅ **Hecho** — Rediseño de UI de tarjetas de crédito para mobile (sección 8): filas colapsadas por defecto, un solo panel de detalle, textos de cierre/vencimiento reales, targets táctiles más grandes, mensaje explícito en el caso de divisas distintas.
-10. ⬜ **Siguiente candidato** — Tipo de cambio histórico (1.1, 1.2): el más grande y estructural — requiere guardar snapshot de tasa por transacción. No bloqueante para el uso diario, pero es la raíz de por qué los reportes históricos "se mueven solos".
-11. ⬜ **A decidir** — Repensar el modelo de Presupuestos vs. Proyectado (sección 11) — permitir duplicados hoy es la causa de fondo de varias rarezas que notó la usuaria. Es un cambio al motor de matching compartido con Proyectado, por eso lo dejo documentado para decidir el enfoque antes de tocarlo.
+10. ✅ **Hecho** — Dedupe de jerarquía de categorías en 4 formularios (incluido el desplegable confuso de Suscripciones) → `domain/categories.js::buildCategoryTree`.
+11. ✅ **Hecho** — Fix de la columna "Del año" en Proyectado → Resumen (no incluía presupuestos para años futuros).
+12. ✅ **Hecho** — Wishlist (sección 12): nueva pantalla, sin relación con el resto de la app. **Falta aplicar la migración SQL manualmente** (ver 12.1).
+13. ⬜ **A decidir, propuestas ya escritas (sección 13)** — Gráficos de Analytics: "Ingresos vs Gastos por día" pierde escala por los picos de cobro/pago de tarjeta, y "Ahorro acumulado" no es lo que la usuaria quiere ver (prefiere neto por mes). Cinco alternativas (A-E) documentadas con mi recomendación, a la espera de que elija.
+14. ⬜ **Siguiente candidato** — Tipo de cambio histórico (1.1, 1.2): el más grande y estructural — requiere guardar snapshot de tasa por transacción. No bloqueante para el uso diario, pero es la raíz de por qué los reportes históricos "se mueven solos".
+15. ⬜ **A decidir** — Repensar el modelo de Presupuestos vs. Proyectado (sección 11) — permitir duplicados hoy es la causa de fondo de varias rarezas que notó la usuaria. Es un cambio al motor de matching compartido con Proyectado, por eso lo dejo documentado para decidir el enfoque antes de tocarlo.
 
 Ver el checklist detallado al principio del documento para el estado ítem por ítem.

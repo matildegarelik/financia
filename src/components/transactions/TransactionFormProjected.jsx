@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { useCurrency } from "@/lib/currency-context";
 import { Checkbox } from "@/components/ui/checkbox";
 import { getReportingMode } from "@/lib/formatters";
+import { buildCategoryTree } from "@/domain/categories";
 
 export default function TransactionFormProjected({ open, onClose, onSubmit, accounts = [], categories = [], initial, defaultMonth }) {
     const { activeCurrencies } = useCurrency();
@@ -62,22 +63,8 @@ export default function TransactionFormProjected({ open, onClose, onSubmit, acco
         });
     };
 
-    const filteredCategories = categories
-        .filter((c) => c.type === form.type)
-        .sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999));
-
-    // Build hierarchical order: parents (sorted) then their children
-    const catParents = filteredCategories.filter((c) => !c.parent_category);
-    const catChildren = filteredCategories.filter((c) => !!c.parent_category);
-    const orderedCats = [];
-    catParents.forEach((p) => {
-        orderedCats.push({ ...p, isParent: true });
-        catChildren
-            .filter((c) => c.parent_category === p.id)
-            .sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999))
-            .forEach((c) => orderedCats.push({ ...c, isParent: false }));
-    });
-    catChildren.filter((c) => !catParents.find((p) => p.id === c.parent_category)).forEach((c) => orderedCats.push({ ...c, isParent: false }));
+    const filteredCategories = categories.filter((c) => c.type === form.type);
+    const orderedCats = buildCategoryTree(filteredCategories);
 
     const sortedAccounts = [...accounts].sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999));
 

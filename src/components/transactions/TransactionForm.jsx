@@ -12,6 +12,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { getReportingMode } from "@/lib/formatters";
 import { calculateTransferExchangeSnapshot, TRANSFER_CALCULATION_MODES } from "@/lib/transferExchange";
 import { getPersonSuggestions } from "@/domain/debts";
+import { buildCategoryTree } from "@/domain/categories";
 import { toast } from "sonner";
 
 function makeGroupId() {
@@ -154,23 +155,8 @@ export default function TransactionForm({ open, onClose, onSubmit, accounts = []
         });
     };
 
-    const filteredCategories = categories
-        .filter((c) => form.type === "transfer" || c.type === form.type)
-        .sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999));
-
-    // Build hierarchical order: parents first, then their children indented
-    const catParents = filteredCategories.filter((c) => !c.parent_category);
-    const catChildren = filteredCategories.filter((c) => !!c.parent_category);
-    const orderedCats = [];
-    catParents.forEach((p) => {
-        orderedCats.push({ ...p, isParent: true });
-        catChildren
-            .filter((c) => c.parent_category === p.id)
-            .forEach((c) => orderedCats.push({ ...c, isParent: false }));
-    });
-    catChildren
-        .filter((c) => !catParents.find((p) => p.id === c.parent_category))
-        .forEach((c) => orderedCats.push({ ...c, isParent: false }));
+    const filteredCategories = categories.filter((c) => form.type === "transfer" || c.type === form.type);
+    const orderedCats = buildCategoryTree(filteredCategories);
 
     const sortedAccounts = accounts
         .filter(a => a.is_visible !== false)

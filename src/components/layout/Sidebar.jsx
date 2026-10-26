@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
     LayoutDashboard, ArrowLeftRight, Wallet, PiggyBank,
-    TrendingUp, Tag, BarChart2, Settings, LogOut, X, Wallet as WalletIcon, CloudLightning, MoreHorizontal, CreditCard, HandCoins, Repeat
+    TrendingUp, Tag, BarChart2, Settings, LogOut, X, Wallet as WalletIcon, CloudLightning, MoreHorizontal, CreditCard, HandCoins, Repeat, Gift
 } from "lucide-react";
 import { supabase } from "@/api/supabaseClient";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,7 @@ export const navItems = [
     { path: "/projected", label: "Proyectado", icon: CloudLightning },
     { path: "/terceros", label: "Terceros", icon: HandCoins },
     { path: "/suscripciones", label: "Suscripciones", icon: Repeat },
+    { path: "/wishlist", label: "Wishlist", icon: Gift },
     { path: "/analytics", label: "Estadísticas", icon: BarChart2 },
     { path: "/settings", label: "Configuración", icon: Settings },
 ];

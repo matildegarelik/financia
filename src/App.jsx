@@ -26,6 +26,7 @@ import Projected from "./pages/Projected";
 import CreditCards from "./pages/CreditCards";
 import Terceros from "./pages/Terceros";
 import Suscripciones from "./pages/Suscripciones";
+import Wishlist from "./pages/Wishlist";
 
 const AuthenticatedApp = () => {
     const { isLoadingAuth, isLoadingPublicSettings, authError, navigateToLogin } = useAuth();
@@ -65,6 +66,7 @@ const AuthenticatedApp = () => {
                     <Route path="/projected" element={<Projected />} />
                     <Route path="/terceros" element={<Terceros />} />
                     <Route path="/suscripciones" element={<Suscripciones />} />
+                    <Route path="/wishlist" element={<Wishlist />} />
                     <Route path="/settings" element={<Settings />} />
                 </Route>
             </Route>
