@@ -1,274 +1,112 @@
 ﻿import React, { useMemo, useState } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery } from "@tanstack/react-query";
-import { BarChart, Bar, LineChart, Line, ComposedChart, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell } from "recharts";
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell, ReferenceLine } from "recharts";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import PageHeader from "@/components/shared/PageHeader";
 import CurrencySelector from "@/components/shared/CurrencySelector";
 import { useCurrency } from "@/lib/currency-context";
 import { formatCurrency, getCurrentMonth, getMonthLabel, TODAY, isRegularExpense, getTransferDifference, affectsReports } from "@/lib/formatters";
-import {
-    filterReportTransactions,
-    getMonthKey,
-    getPaymentMethodData,
-    getTopExpenseCategories,
-    groupIncomeExpenseByPeriod,
-    transactionMatchesReportType,
-} from "@/domain/reporting";
+import { filterReportTransactions, getPaymentMethodData, getTopExpenseCategories } from "@/domain/reporting";
 import { getCategoryOverBudgetFrequency, getMonthlyBudgetCompliance } from "@/domain/budgets";
+import {
+    daysInMonth,
+    formatCompactNumber,
+    getCategoryMonthlyTrend,
+    getMonthlyIncomeExpense,
+    getMonthOverMonthComparison,
+    getSpendingPace,
+    getTopParentExpenseCategoryIds,
+    monthKeysBetween,
+} from "@/domain/analytics";
+import { buildCategoryTree } from "@/domain/categories";
 import { addMonthsToKey } from "@/domain/creditCards";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
-function toISODate(date) {
-    return date.toISOString().split("T")[0];
+const GREEN = "hsl(160, 84%, 28%)";
+const RED = "hsl(0, 72%, 51%)";
+const BLUE = "hsl(199, 89%, 48%)";
+const TREND_COLORS = [BLUE, "hsl(262, 60%, 55%)", "hsl(35, 90%, 50%)", "hsl(330, 70%, 50%)", GREEN, "hsl(190, 70%, 35%)"];
+
+// Rango de fechas de una lista de meses: del 1° del primero al último día del último
+// (o hasta hoy, si el último es el mes en curso).
+function rangeFromMonths(fromKey, toKey) {
+    const end = `${toKey}-${String(daysInMonth(toKey)).padStart(2, "0")}`;
+    return { from: `${fromKey}-01`, to: end > TODAY ? TODAY : end };
 }
 
-function getMonthRange(offset = 0) {
-    const now = new Date();
-    const start = new Date(now.getFullYear(), now.getMonth() + offset, 1);
-    const end = new Date(now.getFullYear(), now.getMonth() + offset + 1, 0);
-    const today = new Date(TODAY);
-    return {
-        from: toISODate(start),
-        to: toISODate(end > today ? today : end),
-    };
+function getPeriodMonths(preset, customFrom, customTo) {
+    const current = getCurrentMonth();
+    const year = Number(current.slice(0, 4));
+    switch (preset) {
+        case "last_3_months": return [addMonthsToKey(current, -2), current];
+        case "last_12_months": return [addMonthsToKey(current, -11), current];
+        case "current_year": return [`${year}-01`, current];
+        case "previous_year": return [`${year - 1}-01`, `${year - 1}-12`];
+        case "custom": return customFrom && customTo && customFrom <= customTo ? [customFrom, customTo] : [addMonthsToKey(current, -5), current];
+        case "last_6_months":
+        default: return [addMonthsToKey(current, -5), current];
+    }
 }
 
-function getRollingRange(months) {
-    const now = new Date();
-    const from = new Date(now.getFullYear(), now.getMonth() - months + 1, 1);
-    return { from: toISODate(from), to: TODAY };
-}
-
-function getYearRange(offset = 0) {
-    const now = new Date();
-    const year = now.getFullYear() + offset;
-    const end = new Date(year, 11, 31);
-    const today = new Date(TODAY);
-    return {
-        from: `${year}-01-01`,
-        to: toISODate(end > today ? today : end),
-    };
-}
-
-function getDayLabel(dateStr) {
-    const [, month, day] = dateStr.split("-");
-    return `${day}/${month}`;
-}
-
-function daysBetween(from, to) {
-    if (!from || !to) return 0;
-    return Math.abs((new Date(to) - new Date(from)) / 86400000);
-}
+const axisMoney = { tick: { fontSize: 11 }, tickFormatter: formatCompactNumber, width: 48 };
 
 export default function Analytics() {
-    const [chartType, setChartType] = useState("bar");
-    const currentRange = getMonthRange(0);
-    const [rangePreset, setRangePreset] = useState("current_month");
-    const [dateFrom, setDateFrom] = useState(currentRange.from);
-    const [dateTo, setDateTo] = useState(currentRange.to);
-    const [categoryMode, setCategoryMode] = useState("all");
-    const [selectedCategoryIds, setSelectedCategoryIds] = useState([]);
+    const currentMonth = getCurrentMonth();
+    const [mode, setMode] = useState("month");
+    const [monthKey, setMonthKey] = useState(currentMonth);
+    const [periodPreset, setPeriodPreset] = useState("last_6_months");
+    const [customFrom, setCustomFrom] = useState(addMonthsToKey(currentMonth, -5));
+    const [customTo, setCustomTo] = useState(currentMonth);
     const { displayCurrency, convert } = useCurrency();
 
     const { data: transactions = [], isLoading } = useQuery({
         queryKey: ["transactions"],
         queryFn: () => base44.entities.Transaction.list("-date"),
     });
-    const { data: categories = [] } = useQuery({
-        queryKey: ["categories"],
-        queryFn: () => base44.entities.Category.list(),
-    });
-    const { data: accounts = [] } = useQuery({
-        queryKey: ["accounts"],
-        queryFn: () => base44.entities.Account.list(),
-    });
-    const { data: statements = [] } = useQuery({
-        queryKey: ["credit_card_statements"],
-        queryFn: () => base44.entities.CreditCardStatement.list(),
-    });
-    const { data: budgets = [] } = useQuery({
-        queryKey: ["budgets"],
-        queryFn: () => base44.entities.Budget.list(),
-    });
-    const [complianceMonths, setComplianceMonths] = useState(6);
+    const { data: categories = [] } = useQuery({ queryKey: ["categories"], queryFn: () => base44.entities.Category.list() });
+    const { data: accounts = [] } = useQuery({ queryKey: ["accounts"], queryFn: () => base44.entities.Account.list() });
+    const { data: statements = [] } = useQuery({ queryKey: ["credit_card_statements"], queryFn: () => base44.entities.CreditCardStatement.list() });
+    const { data: budgets = [] } = useQuery({ queryKey: ["budgets"], queryFn: () => base44.entities.Budget.list() });
 
-    const handleRangePreset = (value) => {
-        setRangePreset(value);
-        const ranges = {
-            current_month: getMonthRange(0),
-            previous_month: getMonthRange(-1),
-            last_3_months: getRollingRange(3),
-            last_6_months: getRollingRange(6),
-            current_year: getYearRange(0),
-            previous_year: getYearRange(-1),
-        };
-        if (ranges[value]) {
-            const range = ranges[value];
-            setDateFrom(range.from);
-            setDateTo(range.to);
-        }
-    };
+    const context = useMemo(() => ({ accounts, statements }), [accounts, statements]);
 
-    const handleCategoryMode = (value) => {
-        setCategoryMode(value);
-        if (value !== "custom") setSelectedCategoryIds([]);
-    };
+    // Todo lo que se muestra sale de este rango: un mes, o los meses del período.
+    const [fromKey, toKey] = mode === "month" ? [monthKey, monthKey] : getPeriodMonths(periodPreset, customFrom, customTo);
+    const { from, to } = rangeFromMonths(fromKey, toKey);
+    const monthKeys = useMemo(() => monthKeysBetween(fromKey, toKey), [fromKey, toKey]);
 
-    const toggleCategory = (id) => {
-        setSelectedCategoryIds((current) =>
-            current.includes(id) ? current.filter((catId) => catId !== id) : [...current, id]
-        );
-    };
-
-    const selectedCategoryFilter = useMemo(() => {
-        const selected = new Set(selectedCategoryIds);
-        const expandedIds = new Set(selectedCategoryIds);
-        const names = new Set();
-
-        categories.forEach((cat) => {
-            if (selected.has(cat.id)) names.add(cat.name);
-            if (cat.parent_category && selected.has(cat.parent_category)) {
-                expandedIds.add(cat.id);
-                names.add(cat.name);
-            }
-        });
-
-        return { ids: expandedIds, names };
-    }, [categories, selectedCategoryIds]);
-
-    const reportingContext = useMemo(() => ({ accounts, statements }), [accounts, statements]);
-
-    const filteredTransactions = useMemo(() => {
-        return filterReportTransactions(transactions, {
-            from: dateFrom,
-            to: dateTo,
-            today: TODAY,
-            context: reportingContext,
-        }).filter((t) => {
-            if (categoryMode === "income" || categoryMode === "expense") return transactionMatchesReportType(t, categoryMode, convert);
-            if (categoryMode === "custom") {
-                if (selectedCategoryIds.length === 0) return true;
-                return selectedCategoryFilter.ids.has(t.category_id) || selectedCategoryFilter.names.has(t.category_name);
-            }
-            return true;
-        });
-    }, [transactions, dateFrom, dateTo, reportingContext, categoryMode, selectedCategoryIds, selectedCategoryFilter, convert]);
-
-    const groupByDay = daysBetween(dateFrom, dateTo) <= 62;
-    const selectedCategoryNames = selectedCategoryIds
-        .map((id) => categories.find((cat) => cat.id === id)?.name)
-        .filter(Boolean);
-    const categorySummary = categoryMode === "custom"
-        ? selectedCategoryIds.length > 0
-            ? selectedCategoryIds.length === 1
-                ? selectedCategoryNames[0] || "1 seleccionada"
-                : `${selectedCategoryIds.length} seleccionadas`
-            : "Todas las categorías"
-        : categoryMode === "income"
-            ? "Solo ingresos"
-            : categoryMode === "expense"
-                ? "Solo gastos"
-                : "Todas";
-    const periodLabel = groupByDay ? "día" : "mes";
-
-    const data = useMemo(() => {
-        const byPeriod = groupIncomeExpenseByPeriod(filteredTransactions, {
-            context: reportingContext,
-            convert,
-            getKey: (reportingDate) => groupByDay ? reportingDate : getMonthKey(reportingDate),
-        });
-
-        const sortedKeys = Object.keys(byPeriod).sort();
-
-        return sortedKeys.map((key) => ({
-            month: groupByDay ? getDayLabel(key) : getMonthLabel(key),
-            key,
-            income: Math.round(byPeriod[key]?.income || 0),
-            expense: Math.round(byPeriod[key]?.expense || 0),
-            saving: Math.round((byPeriod[key]?.income || 0) - (byPeriod[key]?.expense || 0)),
-        }));
-    }, [filteredTransactions, reportingContext, convert, groupByDay]);
-
-    // Cumulative savings
-    const cumulativeData = useMemo(() => {
-        let running = 0;
-        return data.map((d) => {
-            running += d.saving;
-            return { ...d, cumulative: Math.round(running) };
-        });
-    }, [data]);
-
-    // Averages
-    const avgIncome = data.length ? data.reduce((s, d) => s + d.income, 0) / data.length : 0;
-    const avgExpense = data.length ? data.reduce((s, d) => s + d.expense, 0) / data.length : 0;
-    const avgSaving = data.length ? data.reduce((s, d) => s + d.saving, 0) / data.length : 0;
-
-    // Top categories
-    const byCat = useMemo(() =>
-        getTopExpenseCategories(filteredTransactions, convert, { limit: 8, includeTransferDifferences: true }),
-        [filteredTransactions, convert]
+    const rangeTransactions = useMemo(
+        () => filterReportTransactions(transactions, { from, to, today: TODAY, context }),
+        [transactions, from, to, context]
     );
 
-    const paymentMethodData = useMemo(() => {
-        return getPaymentMethodData(filteredTransactions, accounts, convert);
-    }, [filteredTransactions, accounts, convert]);
-
-    const topDescriptions = useMemo(() => {
-        const map = {};
-        filteredTransactions.filter(isRegularExpense).forEach((t) => {
-            const key = (t.description || "Sin descripcion").trim();
-            map[key] = (map[key] || 0) + convert(t.amount || 0, t.currency || "ARS");
-        });
-        filteredTransactions
-            .filter((t) => t.type === "transfer" && affectsReports(t))
-            .forEach((t) => {
-                const diff = getTransferDifference(t, convert);
-                if (diff < 0) {
-                    const key = t.description ? `Dif. transferencia: ${t.description}` : "Diferencia de transferencia";
-                    map[key] = (map[key] || 0) + Math.abs(diff);
-                }
-            });
-        return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 6);
-    }, [filteredTransactions, convert, displayCurrency]);
-
-    // Cumplimiento de presupuesto — independiente del filtro de fecha de arriba,
-    // siempre sobre los últimos N meses completos (no tiene sentido partir un mes).
-    const complianceMonthKeys = useMemo(() => {
-        const current = getCurrentMonth();
-        return Array.from({ length: complianceMonths }, (_, i) => addMonthsToKey(current, i - (complianceMonths - 1)));
-    }, [complianceMonths]);
-
-    const complianceData = useMemo(() =>
-        getMonthlyBudgetCompliance(budgets, transactions, {
-            categories, context: reportingContext, convert, months: complianceMonthKeys,
-        }).map((m) => ({
-            ...m,
-            month: getMonthLabel(m.monthKey),
-            budgeted: Math.round(m.budgeted),
-            spent: Math.round(m.spent),
-        })),
-        [budgets, transactions, categories, reportingContext, convert, complianceMonthKeys]
+    const monthly = useMemo(
+        () => getMonthlyIncomeExpense(transactions, { from, to, context, convert })
+            .map((m) => ({ ...m, month: getMonthLabel(m.monthKey) })),
+        [transactions, from, to, context, convert]
     );
-    const monthsWithBudgets = complianceData.filter((m) => m.hasBudgets);
-    const avgCompliancePct = monthsWithBudgets.length
-        ? monthsWithBudgets.reduce((s, m) => s + (m.pct ?? 0), 0) / monthsWithBudgets.length
-        : null;
+    const totals = monthly.reduce((acc, m) => ({
+        income: acc.income + m.income, expense: acc.expense + m.expense, saving: acc.saving + m.saving,
+    }), { income: 0, expense: 0, saving: 0 });
+    const divisor = mode === "month" ? 1 : Math.max(monthly.length, 1);
 
-    const overBudgetCategories = useMemo(() =>
-        getCategoryOverBudgetFrequency(budgets, transactions, {
-            categories, context: reportingContext, convert, months: complianceMonthKeys,
-        }).slice(0, 6),
-        [budgets, transactions, categories, reportingContext, convert, complianceMonthKeys]
+    const topCategories = useMemo(
+        () => getTopExpenseCategories(rangeTransactions, convert, { limit: 8, includeTransferDifferences: true }),
+        [rangeTransactions, convert]
     );
+    const paymentMethodData = useMemo(() => getPaymentMethodData(rangeTransactions, accounts, convert), [rangeTransactions, accounts, convert]);
+    const topDescriptions = useMemo(() => getTopDescriptions(rangeTransactions, convert), [rangeTransactions, convert]);
 
     if (isLoading) {
         return (
@@ -279,118 +117,71 @@ export default function Analytics() {
         );
     }
 
-    const ChartComponent = chartType === "bar" ? BarChart : LineChart;
-
     return (
         <div className="space-y-5">
-            <PageHeader
-                title="Estadísticas"
-                description="Historial financiero por rango y categoría"
-                action={<CurrencySelector />}
-            />
+            <PageHeader title="Estadísticas" description="Un mes en detalle, o la evolución a lo largo de un período" action={<CurrencySelector />} />
 
             <Card>
                 <CardContent className="p-3 sm:p-4 space-y-3">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_auto] gap-3 items-end">
-                        <div>
-                            <Label className="text-xs">Rango</Label>
-                            <Select value={rangePreset} onValueChange={handleRangePreset}>
-                                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="current_month">Este mes</SelectItem>
-                                    <SelectItem value="previous_month">Mes anterior</SelectItem>
-                                    <SelectItem value="last_3_months">Ultimos 3 meses</SelectItem>
-                                    <SelectItem value="last_6_months">Ultimos 6 meses</SelectItem>
-                                    <SelectItem value="current_year">Este ano</SelectItem>
-                                    <SelectItem value="previous_year">Ano pasado</SelectItem>
-                                    <SelectItem value="custom">Personalizado</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div>
-                            <Label className="text-xs">Categorías</Label>
-                            <Select value={categoryMode} onValueChange={handleCategoryMode}>
-                                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="all">Todas</SelectItem>
-                                    <SelectItem value="custom">Seleccionar una o varias</SelectItem>
-                                    <SelectItem value="income">Solo ingresos</SelectItem>
-                                    <SelectItem value="expense">Solo gastos</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div className="text-xs text-muted-foreground lg:text-right">
-                            <span className="font-medium text-foreground">{filteredTransactions.length}</span> movimientos
-                            <span className="hidden lg:inline"> · {categorySummary}</span>
-                        </div>
-                    </div>
+                    <Tabs value={mode} onValueChange={setMode}>
+                        <TabsList className="grid grid-cols-2 w-full sm:w-64">
+                            <TabsTrigger value="month">Mes</TabsTrigger>
+                            <TabsTrigger value="period">Período</TabsTrigger>
+                        </TabsList>
+                    </Tabs>
 
-                    {rangePreset === "custom" && (
-                        <div className="grid grid-cols-2 gap-3">
-                            <div>
-                                <Label className="text-xs">Desde</Label>
-                                <Input type="date" className="h-9" value={dateFrom}
-                                    onChange={(e) => setDateFrom(e.target.value)} />
+                    {mode === "month" ? (
+                        <div className="flex items-center justify-between">
+                            <Button variant="ghost" size="icon" onClick={() => setMonthKey(addMonthsToKey(monthKey, -1))}>
+                                <ChevronLeft className="h-4 w-4" />
+                            </Button>
+                            <div className="text-center">
+                                <p className="font-semibold capitalize">{getMonthLabel(monthKey)}</p>
+                                {monthKey === currentMonth && <Badge variant="secondary" className="text-xs mt-0.5">Mes en curso</Badge>}
                             </div>
-                            <div>
-                                <Label className="text-xs">Hasta</Label>
-                                <Input type="date" className="h-9" value={dateTo}
-                                    onChange={(e) => setDateTo(e.target.value)} />
-                            </div>
+                            <Button variant="ghost" size="icon" disabled={monthKey >= currentMonth} onClick={() => setMonthKey(addMonthsToKey(monthKey, 1))}>
+                                <ChevronRight className="h-4 w-4" />
+                            </Button>
                         </div>
-                    )}
-
-                    {categoryMode === "custom" && (
-                        <div className="flex items-center gap-2">
-                            <Popover>
-                                <PopoverTrigger asChild>
-                                    <Button variant="outline" size="sm" className="h-8">
-                                        {categorySummary}
-                                    </Button>
-                                </PopoverTrigger>
-                                <PopoverContent align="start" className="w-80 p-2">
-                                    <div className="max-h-72 overflow-y-auto space-y-1">
-                                        {categories.length === 0 ? (
-                                            <p className="text-sm text-muted-foreground p-2">No hay categorías</p>
-                                        ) : categories
-                                            .slice()
-                                            .sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999))
-                                            .map((cat) => (
-                                                <label key={cat.id}
-                                                    className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted cursor-pointer">
-                                                    <Checkbox
-                                                        checked={selectedCategoryIds.includes(cat.id)}
-                                                        onCheckedChange={() => toggleCategory(cat.id)}
-                                                    />
-                                                    <span className="flex-1 truncate">{cat.name}</span>
-                                                    <span className={cn(
-                                                        "text-[10px] uppercase tracking-wide",
-                                                        cat.type === "income" ? "text-primary" : "text-destructive"
-                                                    )}>
-                                                        {cat.type === "income" ? "ingreso" : "gasto"}
-                                                    </span>
-                                                </label>
-                                            ))}
+                    ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+                            <div>
+                                <Label className="text-xs">Período</Label>
+                                <Select value={periodPreset} onValueChange={setPeriodPreset}>
+                                    <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="last_3_months">Últimos 3 meses</SelectItem>
+                                        <SelectItem value="last_6_months">Últimos 6 meses</SelectItem>
+                                        <SelectItem value="last_12_months">Últimos 12 meses</SelectItem>
+                                        <SelectItem value="current_year">Este año</SelectItem>
+                                        <SelectItem value="previous_year">Año pasado</SelectItem>
+                                        <SelectItem value="custom">Personalizado</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            {periodPreset === "custom" && (
+                                <>
+                                    <div>
+                                        <Label className="text-xs">Desde</Label>
+                                        <Input type="month" className="h-9" value={customFrom} max={currentMonth} onChange={(e) => setCustomFrom(e.target.value)} />
                                     </div>
-                                </PopoverContent>
-                            </Popover>
-                            {selectedCategoryIds.length > 0 && (
-                                <Button variant="ghost" size="sm" className="h-8 px-2 text-xs"
-                                    onClick={() => setSelectedCategoryIds([])}>
-                                    Limpiar
-                                </Button>
+                                    <div>
+                                        <Label className="text-xs">Hasta</Label>
+                                        <Input type="month" className="h-9" value={customTo} max={currentMonth} onChange={(e) => setCustomTo(e.target.value)} />
+                                    </div>
+                                </>
                             )}
                         </div>
                     )}
                 </CardContent>
             </Card>
 
-            {/* Summary cards */}
+            {/* Resumen */}
             <div className="grid grid-cols-3 gap-3">
                 {[
-                    { label: "Ingreso promedio", value: avgIncome, color: "text-primary" },
-                    { label: "Gasto promedio", value: avgExpense, color: "text-destructive" },
-                    { label: "Ahorro promedio", value: avgSaving, color: avgSaving >= 0 ? "text-primary" : "text-destructive" },
+                    { label: mode === "month" ? "Ingresos" : "Ingreso promedio mensual", value: totals.income / divisor, color: "text-primary" },
+                    { label: mode === "month" ? "Gastos" : "Gasto promedio mensual", value: totals.expense / divisor, color: "text-destructive" },
+                    { label: mode === "month" ? "Ahorro" : "Ahorro promedio mensual", value: totals.saving / divisor, color: totals.saving >= 0 ? "text-primary" : "text-destructive" },
                 ].map((s) => (
                     <Card key={s.label}>
                         <CardContent className="p-4">
@@ -401,158 +192,25 @@ export default function Analytics() {
                 ))}
             </div>
 
-            {/* Main chart */}
-            <Card>
-                <CardHeader className="pb-2">
-                    <div className="flex items-center justify-between flex-wrap gap-2">
-                        <CardTitle className="text-base">Ingresos vs Gastos por {periodLabel}</CardTitle>
-                        <Tabs value={chartType} onValueChange={setChartType}>
-                            <TabsList className="h-7">
-                                <TabsTrigger value="bar" className="text-xs px-3">Barras</TabsTrigger>
-                                <TabsTrigger value="line" className="text-xs px-3">Líneas</TabsTrigger>
-                            </TabsList>
-                        </Tabs>
-                    </div>
-                </CardHeader>
-                <CardContent>
-                    {data.length === 0 ? (
-                        <p className="text-center text-muted-foreground py-12 text-sm">No hay datos históricos aún</p>
-                    ) : (
-                        <ResponsiveContainer width="100%" height={280}>
-                            <ChartComponent data={data}>
-                                <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-                                <XAxis dataKey="month" tick={{ fontSize: 11 }} />
-                                <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${Math.round(v / 1000)}k`} />
-                                <Tooltip formatter={(v) => formatCurrency(v, displayCurrency)} />
-                                <Legend />
-                                {chartType === "bar" ? (
-                                    <>
-                                        <Bar dataKey="income" name="Ingresos" fill="hsl(160, 84%, 28%)" radius={[4, 4, 0, 0]} />
-                                        <Bar dataKey="expense" name="Gastos" fill="hsl(0, 72%, 51%)" radius={[4, 4, 0, 0]} />
-                                        <Bar dataKey="saving" name="Ahorro" fill="hsl(199, 89%, 48%)" radius={[4, 4, 0, 0]} />
-                                    </>
-                                ) : (
-                                    <>
-                                        <Line type="monotone" dataKey="income" name="Ingresos" stroke="hsl(160, 84%, 28%)" strokeWidth={2} dot={false} />
-                                        <Line type="monotone" dataKey="expense" name="Gastos" stroke="hsl(0, 72%, 51%)" strokeWidth={2} dot={false} />
-                                        <Line type="monotone" dataKey="saving" name="Ahorro" stroke="hsl(199, 89%, 48%)" strokeWidth={2} dot={false} />
-                                    </>
-                                )}
-                            </ChartComponent>
-                        </ResponsiveContainer>
-                    )}
-                </CardContent>
-            </Card>
+            {mode === "month" ? (
+                <>
+                    <MonthComparisonCard transactions={transactions} monthKey={monthKey} to={to} context={context} convert={convert} displayCurrency={displayCurrency} />
+                    <SpendingPaceCard transactions={transactions} budgets={budgets} monthKey={monthKey} categories={categories} context={context} convert={convert} displayCurrency={displayCurrency} />
+                </>
+            ) : (
+                <>
+                    <IncomeExpenseCard monthly={monthly} displayCurrency={displayCurrency} />
+                    <SavingsCard monthly={monthly} displayCurrency={displayCurrency} />
+                    <BudgetComplianceCard budgets={budgets} transactions={transactions} categories={categories} context={context} convert={convert} monthKeys={monthKeys} currentMonth={currentMonth} displayCurrency={displayCurrency} />
+                    <CategoryTrendCard transactions={transactions} categories={categories} from={from} to={to} context={context} convert={convert} displayCurrency={displayCurrency} />
+                </>
+            )}
 
-            {/* Cumulative savings */}
-            <Card>
-                <CardHeader className="pb-2">
-                    <CardTitle className="text-base">Ahorro acumulado</CardTitle>
-                </CardHeader>
-                <CardContent>
-                    <ResponsiveContainer width="100%" height={200}>
-                        <LineChart data={cumulativeData}>
-                            <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-                            <XAxis dataKey="month" tick={{ fontSize: 11 }} />
-                            <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${Math.round(v / 1000)}k`} />
-                            <Tooltip formatter={(v) => formatCurrency(v, displayCurrency)} />
-                            <Line type="monotone" dataKey="cumulative" name="Ahorro acumulado"
-                                stroke="hsl(160, 84%, 28%)" strokeWidth={2} dot={false} fill="hsl(160, 84%, 28%)" />
-                        </LineChart>
-                    </ResponsiveContainer>
-                </CardContent>
-            </Card>
-
-            {/* Budget compliance history */}
-            <Card>
-                <CardHeader className="pb-2">
-                    <div className="flex items-center justify-between flex-wrap gap-2">
-                        <CardTitle className="text-base">Cumplimiento de presupuesto</CardTitle>
-                        <Tabs value={String(complianceMonths)} onValueChange={(v) => setComplianceMonths(Number(v))}>
-                            <TabsList className="h-7">
-                                <TabsTrigger value="6" className="text-xs px-3">6 meses</TabsTrigger>
-                                <TabsTrigger value="12" className="text-xs px-3">12 meses</TabsTrigger>
-                            </TabsList>
-                        </Tabs>
-                    </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                    {monthsWithBudgets.length === 0 ? (
-                        <p className="text-center text-muted-foreground py-8 text-sm">
-                            No hay presupuestos de gasto configurados en este rango.
-                        </p>
-                    ) : (
-                        <>
-                            <p className="text-xs text-muted-foreground">
-                                Promedio de cumplimiento: <span className="font-semibold text-foreground">{Math.round(avgCompliancePct)}%</span> del presupuesto
-                                ({monthsWithBudgets.length} mes{monthsWithBudgets.length !== 1 ? "es" : ""} con presupuesto configurado de {complianceMonths})
-                            </p>
-                            <ResponsiveContainer width="100%" height={260}>
-                                <ComposedChart data={complianceData}>
-                                    <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-                                    <XAxis dataKey="month" tick={{ fontSize: 11 }} />
-                                    <YAxis yAxisId="amount" tick={{ fontSize: 11 }} tickFormatter={(v) => `${Math.round(v / 1000)}k`} />
-                                    <YAxis yAxisId="pct" orientation="right" tick={{ fontSize: 11 }} tickFormatter={(v) => `${v}%`} domain={[0, 150]} />
-                                    <Tooltip formatter={(v, name) => name === "% cumplimiento" ? `${Math.round(v)}%` : formatCurrency(v, displayCurrency)} />
-                                    <Legend />
-                                    <Bar yAxisId="amount" dataKey="budgeted" name="Presupuestado" fill="hsl(199, 89%, 48%)" radius={[4, 4, 0, 0]} />
-                                    <Bar yAxisId="amount" dataKey="spent" name="Gastado" fill="hsl(0, 72%, 51%)" radius={[4, 4, 0, 0]} />
-                                    <Line yAxisId="pct" type="monotone" dataKey="pct" name="% cumplimiento" stroke="hsl(160, 84%, 28%)" strokeWidth={2} dot={{ r: 3 }} connectNulls />
-                                </ComposedChart>
-                            </ResponsiveContainer>
-                            {overBudgetCategories.length > 0 && (
-                                <div>
-                                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
-                                        Categorías que más seguido se excedieron
-                                    </p>
-                                    <div className="space-y-1.5">
-                                        {overBudgetCategories.map((c) => (
-                                            <div key={c.category_name} className="flex items-center justify-between text-sm">
-                                                <span className="truncate">{c.category_name}</span>
-                                                <span className="text-destructive font-medium shrink-0">
-                                                    {c.overMonths}/{c.monthsWithBudget} meses excedida
-                                                </span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-                        </>
-                    )}
-                </CardContent>
-            </Card>
-
-            {/* Top expense categories */}
-            <Card>
-                <CardHeader className="pb-2">
-                    <CardTitle className="text-base">Top categorías de gasto</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                    {byCat.length === 0 ? (
-                        <p className="text-sm text-muted-foreground text-center py-4">Sin datos</p>
-                    ) : byCat.map(([cat, val], i) => {
-                        const max = byCat[0][1];
-                        const pct = (val / max) * 100;
-                        return (
-                            <div key={cat} className="space-y-1">
-                                <div className="flex justify-between text-sm">
-                                    <span>{cat}</span>
-                                    <span className="font-medium">{formatCurrency(val, displayCurrency)}</span>
-                                </div>
-                                <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                                    <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${pct}%` }} />
-                                </div>
-                            </div>
-                        );
-                    })}
-                </CardContent>
-            </Card>
+            <TopCategoriesCard topCategories={topCategories} displayCurrency={displayCurrency} />
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <Card>
-                    <CardHeader className="pb-2">
-                        <CardTitle className="text-base">Tarjeta vs otros medios</CardTitle>
-                    </CardHeader>
+                    <CardHeader className="pb-2"><CardTitle className="text-base">Tarjeta vs otros medios</CardTitle></CardHeader>
                     <CardContent>
                         {paymentMethodData.length === 0 ? (
                             <p className="text-sm text-muted-foreground text-center py-10">Sin datos</p>
@@ -571,9 +229,7 @@ export default function Analytics() {
                 </Card>
 
                 <Card>
-                    <CardHeader className="pb-2">
-                        <CardTitle className="text-base">Top comercios/descripciones</CardTitle>
-                    </CardHeader>
+                    <CardHeader className="pb-2"><CardTitle className="text-base">Top comercios/descripciones</CardTitle></CardHeader>
                     <CardContent className="space-y-2">
                         {topDescriptions.length === 0 ? (
                             <p className="text-sm text-muted-foreground text-center py-10">Sin datos</p>
@@ -587,5 +243,409 @@ export default function Analytics() {
                 </Card>
             </div>
         </div>
+    );
+}
+
+function getTopDescriptions(transactions, convert) {
+    const map = {};
+    transactions.filter(isRegularExpense).forEach((t) => {
+        const key = (t.description || "Sin descripcion").trim();
+        map[key] = (map[key] || 0) + convert(t.amount || 0, t.currency || "ARS");
+    });
+    transactions
+        .filter((t) => t.type === "transfer" && affectsReports(t))
+        .forEach((t) => {
+            const diff = getTransferDifference(t, convert);
+            if (diff < 0) {
+                const key = t.description ? `Dif. transferencia: ${t.description}` : "Diferencia de transferencia";
+                map[key] = (map[key] || 0) + Math.abs(diff);
+            }
+        });
+    return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 6);
+}
+
+// ─── Modo Mes ────────────────────────────────────────────────────────────────
+
+function MonthComparisonCard({ transactions, monthKey, to, context, convert, displayCurrency }) {
+    const comparison = useMemo(
+        () => getMonthOverMonthComparison(transactions, { monthKey, to, context, convert }),
+        [transactions, monthKey, to, context, convert]
+    );
+    return (
+        <Card>
+            <CardHeader className="pb-2">
+                <CardTitle className="text-base">Gasto vs. <span className="capitalize">{getMonthLabel(comparison.prevKey)}</span></CardTitle>
+                {comparison.isPartial && (
+                    <p className="text-xs text-muted-foreground">
+                        Mes en curso: se compara contra los primeros {comparison.cutoffDay} días del mes anterior.
+                    </p>
+                )}
+            </CardHeader>
+            <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                        <p className="text-xs text-muted-foreground capitalize">{getMonthLabel(monthKey)}</p>
+                        <p className="text-lg font-bold">{formatCurrency(comparison.currentTotal, displayCurrency)}</p>
+                    </div>
+                    <div>
+                        <p className="text-xs text-muted-foreground capitalize">{getMonthLabel(comparison.prevKey)}</p>
+                        <p className="text-lg font-bold text-muted-foreground">{formatCurrency(comparison.prevTotal, displayCurrency)}</p>
+                    </div>
+                </div>
+                {comparison.pctChange !== null && (
+                    <p className={cn("text-sm font-medium", comparison.pctChange > 0 ? "text-destructive" : "text-primary")}>
+                        Gastaste {Math.abs(Math.round(comparison.pctChange))}% {comparison.pctChange > 0 ? "más" : "menos"} que el mes anterior
+                    </p>
+                )}
+                {comparison.changes.length > 0 && (
+                    <div>
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Lo que más cambió</p>
+                        <div className="space-y-1.5">
+                            {comparison.changes.map((c) => (
+                                <div key={c.category} className="flex items-center justify-between gap-3 text-sm">
+                                    <span className="truncate">{c.category}</span>
+                                    <span className={cn("font-medium shrink-0", c.diff > 0 ? "text-destructive" : "text-primary")}>
+                                        {c.diff > 0 ? "+" : "−"}{formatCurrency(Math.abs(c.diff), displayCurrency)}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+            </CardContent>
+        </Card>
+    );
+}
+
+function SpendingPaceCard({ transactions, budgets, monthKey, categories, context, convert, displayCurrency }) {
+    const pace = useMemo(
+        () => getSpendingPace(transactions, budgets, { monthKey, categories, context, convert, today: TODAY }),
+        [transactions, budgets, monthKey, categories, context, convert]
+    );
+    return (
+        <Card>
+            <CardHeader className="pb-2">
+                <CardTitle className="text-base">Ritmo de gasto</CardTitle>
+                <p className="text-xs text-muted-foreground">Gastado en categorías con presupuesto, contra el presupuesto repartido parejo en el mes.</p>
+            </CardHeader>
+            <CardContent className="space-y-3">
+                {!pace ? (
+                    <p className="text-center text-muted-foreground py-8 text-sm">No hay presupuestos de gasto para este mes.</p>
+                ) : (
+                    <>
+                        {pace.lastDay > 0 && <PaceSummary pace={pace} displayCurrency={displayCurrency} />}
+                        <ResponsiveContainer width="100%" height={220}>
+                            <LineChart data={pace.days}>
+                                <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+                                <XAxis dataKey="day" tick={{ fontSize: 11 }} />
+                                <YAxis {...axisMoney} />
+                                <Tooltip labelFormatter={(d) => `Día ${d}`} formatter={(v) => formatCurrency(v, displayCurrency)} />
+                                <Legend />
+                                <Line type="linear" dataKey="ideal" name="Ritmo planeado" stroke={BLUE} strokeWidth={2} strokeDasharray="5 4" dot={false} />
+                                <Line type="stepAfter" dataKey="actual" name="Gastado real" stroke={RED} strokeWidth={2} dot={false} connectNulls={false} />
+                            </LineChart>
+                        </ResponsiveContainer>
+                    </>
+                )}
+            </CardContent>
+        </Card>
+    );
+}
+
+function PaceSummary({ pace, displayCurrency }) {
+    const diff = pace.spentSoFar - pace.expectedSoFar;
+    const over = diff > 0;
+    const money = (v) => <span className="font-semibold">{formatCurrency(v, displayCurrency)}</span>;
+    if (pace.lastDay === pace.totalDays) {
+        return (
+            <p className="text-sm">
+                Mes cerrado: gastaste {money(pace.spentSoFar)} de {money(pace.budgetTotal)} presupuestados.{" "}
+                <span className={cn("font-medium", over ? "text-destructive" : "text-primary")}>
+                    {over ? "Te pasaste por" : "Te sobraron"} {formatCurrency(Math.abs(diff), displayCurrency)}.
+                </span>
+            </p>
+        );
+    }
+    return (
+        <p className="text-sm">
+            Día {pace.lastDay} de {pace.totalDays}: llevás {money(pace.spentSoFar)} y a este ritmo deberías llevar {money(pace.expectedSoFar)}.{" "}
+            <span className={cn("font-medium", over ? "text-destructive" : "text-primary")}>
+                {over ? "Vas más rápido" : "Vas más lento"} de lo planeado ({formatCurrency(Math.abs(diff), displayCurrency)}).
+            </span>
+        </p>
+    );
+}
+
+// ─── Modo Período ────────────────────────────────────────────────────────────
+
+function IncomeExpenseCard({ monthly, displayCurrency }) {
+    const [chartType, setChartType] = useState("bar");
+    const ChartComponent = chartType === "bar" ? BarChart : LineChart;
+    return (
+        <Card>
+            <CardHeader className="pb-2">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                    <CardTitle className="text-base">Ingresos vs Gastos por mes</CardTitle>
+                    <Tabs value={chartType} onValueChange={setChartType}>
+                        <TabsList className="h-7">
+                            <TabsTrigger value="bar" className="text-xs px-3">Barras</TabsTrigger>
+                            <TabsTrigger value="line" className="text-xs px-3">Líneas</TabsTrigger>
+                        </TabsList>
+                    </Tabs>
+                </div>
+            </CardHeader>
+            <CardContent>
+                <ResponsiveContainer width="100%" height={280}>
+                    <ChartComponent data={monthly}>
+                        <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+                        <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                        <YAxis {...axisMoney} />
+                        <Tooltip formatter={(v) => formatCurrency(v, displayCurrency)} />
+                        <Legend />
+                        {chartType === "bar" ? (
+                            <>
+                                <Bar dataKey="income" name="Ingresos" fill={GREEN} radius={[4, 4, 0, 0]} />
+                                <Bar dataKey="expense" name="Gastos" fill={RED} radius={[4, 4, 0, 0]} />
+                            </>
+                        ) : (
+                            <>
+                                <Line type="monotone" dataKey="income" name="Ingresos" stroke={GREEN} strokeWidth={2} dot={false} />
+                                <Line type="monotone" dataKey="expense" name="Gastos" stroke={RED} strokeWidth={2} dot={false} />
+                            </>
+                        )}
+                    </ChartComponent>
+                </ResponsiveContainer>
+            </CardContent>
+        </Card>
+    );
+}
+
+function SavingsCard({ monthly, displayCurrency }) {
+    return (
+        <Card>
+            <CardHeader className="pb-2">
+                <CardTitle className="text-base">Ahorro neto por mes</CardTitle>
+                <p className="text-xs text-muted-foreground">Ingresos menos gastos de cada mes.</p>
+            </CardHeader>
+            <CardContent>
+                <ResponsiveContainer width="100%" height={220}>
+                    <BarChart data={monthly}>
+                        <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+                        <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                        <YAxis {...axisMoney} />
+                        <Tooltip formatter={(v) => formatCurrency(v, displayCurrency)} />
+                        <ReferenceLine y={0} className="stroke-border" />
+                        <Bar dataKey="saving" name="Ahorro neto" radius={[4, 4, 0, 0]}>
+                            {monthly.map((m) => <Cell key={m.monthKey} fill={m.saving >= 0 ? GREEN : RED} />)}
+                        </Bar>
+                    </BarChart>
+                </ResponsiveContainer>
+            </CardContent>
+        </Card>
+    );
+}
+
+function BudgetComplianceCard({ budgets, transactions, categories, context, convert, monthKeys, currentMonth, displayCurrency }) {
+    const rows = useMemo(() =>
+        getMonthlyBudgetCompliance(budgets, transactions, { categories, context, convert, months: monthKeys })
+            .map((m) => ({
+                ...m,
+                month: getMonthLabel(m.monthKey),
+                pct: m.hasBudgets && m.pct !== null ? Math.round(m.pct) : null,
+                inProgress: m.monthKey === currentMonth,
+            })),
+        [budgets, transactions, categories, context, convert, monthKeys, currentMonth]
+    );
+    const overCategories = useMemo(() =>
+        getCategoryOverBudgetFrequency(budgets, transactions, { categories, context, convert, months: monthKeys }).slice(0, 6),
+        [budgets, transactions, categories, context, convert, monthKeys]
+    );
+
+    const closed = rows.filter((r) => r.hasBudgets && !r.inProgress);
+    const within = closed.filter((r) => r.pct <= 100).length;
+    const running = rows.find((r) => r.hasBudgets && r.inProgress);
+    const maxPct = Math.max(120, ...rows.map((r) => r.pct ?? 0));
+
+    return (
+        <Card>
+            <CardHeader className="pb-2">
+                <CardTitle className="text-base">Cumplimiento de presupuesto</CardTitle>
+                <p className="text-xs text-muted-foreground">Cuánto del presupuesto de gasto usaste cada mes. Por debajo de la línea de 100% está bien.</p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+                {!rows.some((r) => r.hasBudgets) ? (
+                    <p className="text-center text-muted-foreground py-8 text-sm">No hay presupuestos de gasto configurados en este período.</p>
+                ) : (
+                    <>
+                        <p className="text-sm">
+                            {closed.length > 0 ? (
+                                <>
+                                    Te mantuviste dentro del presupuesto en{" "}
+                                    <span className={cn("font-semibold", within === closed.length ? "text-primary" : within === 0 ? "text-destructive" : "")}>
+                                        {within} de {closed.length}
+                                    </span>{" "}
+                                    mes{closed.length !== 1 ? "es" : ""} cerrado{closed.length !== 1 ? "s" : ""}.
+                                </>
+                            ) : "Todavía no hay meses cerrados con presupuesto en este período."}
+                            {running && (
+                                <span className="text-muted-foreground"> El mes en curso va en {running.pct}% hasta ahora.</span>
+                            )}
+                        </p>
+                        <ResponsiveContainer width="100%" height={240}>
+                            <BarChart data={rows}>
+                                <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+                                <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                                <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${v}%`} domain={[0, Math.ceil(maxPct / 10) * 10]} width={44} />
+                                <Tooltip content={<ComplianceTooltip displayCurrency={displayCurrency} />} />
+                                <ReferenceLine y={100} stroke="hsl(var(--muted-foreground))" strokeDasharray="5 4" label={{ value: "Presupuesto", position: "insideTopRight", fontSize: 11 }} />
+                                <Bar dataKey="pct" name="% usado" radius={[4, 4, 0, 0]}>
+                                    {rows.map((r) => (
+                                        <Cell key={r.monthKey} fill={(r.pct ?? 0) > 100 ? RED : GREEN} fillOpacity={r.inProgress ? 0.4 : 1} />
+                                    ))}
+                                </Bar>
+                            </BarChart>
+                        </ResponsiveContainer>
+                        {overCategories.length > 0 && (
+                            <div>
+                                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Categorías que más seguido se pasaron</p>
+                                <div className="space-y-1.5">
+                                    {overCategories.map((c) => (
+                                        <div key={c.category_name} className="flex items-center justify-between text-sm">
+                                            <span className="truncate">{c.category_name}</span>
+                                            <span className="text-destructive font-medium shrink-0">se pasó {c.overMonths} de {c.monthsWithBudget} meses</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </>
+                )}
+            </CardContent>
+        </Card>
+    );
+}
+
+function ComplianceTooltip({ active, payload, displayCurrency }) {
+    if (!active || !payload?.length) return null;
+    const r = payload[0].payload;
+    return (
+        <div className="rounded-md border bg-background px-3 py-2 text-xs shadow-sm space-y-0.5">
+            <p className="font-medium capitalize">{r.month}{r.inProgress ? " (en curso)" : ""}</p>
+            {r.hasBudgets ? (
+                <>
+                    <p>Gastado: {formatCurrency(r.spent, displayCurrency)}</p>
+                    <p>Presupuesto: {formatCurrency(r.budgeted, displayCurrency)}</p>
+                    <p className={cn("font-medium", r.pct > 100 ? "text-destructive" : "text-primary")}>
+                        {r.pct > 100 ? `Te pasaste ${r.pct - 100}%` : `Usaste ${r.pct}%`}
+                    </p>
+                </>
+            ) : <p className="text-muted-foreground">Sin presupuesto este mes</p>}
+        </div>
+    );
+}
+
+function CategoryTrendCard({ transactions, categories, from, to, context, convert, displayCurrency }) {
+    // null = todavía no se eligió nada: se sugieren las 3 categorías con más gasto.
+    const [selectedIds, setSelectedIds] = useState(null);
+    const suggestedIds = useMemo(
+        () => getTopParentExpenseCategoryIds(transactions, { from, to, context, convert, categories }),
+        [transactions, from, to, context, convert, categories]
+    );
+    const categoryIds = (selectedIds ?? suggestedIds).filter((id) => categories.some((c) => c.id === id));
+    const rows = useMemo(
+        () => getCategoryMonthlyTrend(transactions, { from, to, context, convert, categories, categoryIds })
+            .map((r) => ({ ...r, month: getMonthLabel(r.monthKey) })),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [transactions, from, to, context, convert, categories, categoryIds.join(",")]
+    );
+    const tree = useMemo(() => buildCategoryTree(categories), [categories]);
+    const nameOf = (id) => categories.find((c) => c.id === id)?.name || "—";
+    const toggle = (id) => {
+        const current = selectedIds ?? suggestedIds;
+        setSelectedIds(current.includes(id) ? current.filter((x) => x !== id) : [...current, id]);
+    };
+
+    return (
+        <Card>
+            <CardHeader className="pb-2">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div>
+                        <CardTitle className="text-base">Evolución por categoría</CardTitle>
+                        <p className="text-xs text-muted-foreground">
+                            {selectedIds === null ? "Mostrando las 3 categorías con más gasto. " : ""}Incluye sus subcategorías.
+                        </p>
+                    </div>
+                    <Popover>
+                        <PopoverTrigger asChild>
+                            <Button variant="outline" size="sm" className="h-8">
+                                {categoryIds.length === 0 ? "Elegir categorías" : `${categoryIds.length} categoría${categoryIds.length !== 1 ? "s" : ""}`}
+                            </Button>
+                        </PopoverTrigger>
+                        <PopoverContent align="end" className="w-72 p-2">
+                            <div className="max-h-72 overflow-y-auto space-y-0.5">
+                                {tree.length === 0 ? (
+                                    <p className="text-sm text-muted-foreground p-2">No hay categorías</p>
+                                ) : tree.map((c) => (
+                                    <label key={c.id} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted cursor-pointer">
+                                        <Checkbox checked={categoryIds.includes(c.id)} onCheckedChange={() => toggle(c.id)} />
+                                        <span className={cn("flex-1 truncate", !c.isParent && "pl-3 text-muted-foreground")}>
+                                            {c.isParent ? c.name : `↳ ${c.name}`}
+                                        </span>
+                                    </label>
+                                ))}
+                            </div>
+                            {selectedIds !== null && (
+                                <Button variant="ghost" size="sm" className="w-full mt-1 h-8 text-xs" onClick={() => setSelectedIds(null)}>
+                                    Volver a la sugerencia
+                                </Button>
+                            )}
+                        </PopoverContent>
+                    </Popover>
+                </div>
+            </CardHeader>
+            <CardContent>
+                {categoryIds.length === 0 ? (
+                    <p className="text-center text-muted-foreground py-8 text-sm">Elegí una o más categorías para ver cómo cambian mes a mes.</p>
+                ) : (
+                    <ResponsiveContainer width="100%" height={240}>
+                        <LineChart data={rows}>
+                            <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+                            <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                            <YAxis {...axisMoney} />
+                            <Tooltip formatter={(v) => formatCurrency(v, displayCurrency)} />
+                            <Legend />
+                            {categoryIds.map((id, i) => (
+                                <Line key={id} type="monotone" dataKey={id} name={nameOf(id)} stroke={TREND_COLORS[i % TREND_COLORS.length]} strokeWidth={2} dot={{ r: 3 }} />
+                            ))}
+                        </LineChart>
+                    </ResponsiveContainer>
+                )}
+            </CardContent>
+        </Card>
+    );
+}
+
+// ─── Común ───────────────────────────────────────────────────────────────────
+
+function TopCategoriesCard({ topCategories, displayCurrency }) {
+    return (
+        <Card>
+            <CardHeader className="pb-2"><CardTitle className="text-base">Top categorías de gasto</CardTitle></CardHeader>
+            <CardContent className="space-y-2">
+                {topCategories.length === 0 ? (
+                    <p className="text-sm text-muted-foreground text-center py-4">Sin datos</p>
+                ) : topCategories.map(([cat, val]) => (
+                    <div key={cat} className="space-y-1">
+                        <div className="flex justify-between text-sm">
+                            <span>{cat}</span>
+                            <span className="font-medium">{formatCurrency(val, displayCurrency)}</span>
+                        </div>
+                        <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                            <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${(val / topCategories[0][1]) * 100}%` }} />
+                        </div>
+                    </div>
+                ))}
+            </CardContent>
+        </Card>
     );
 }

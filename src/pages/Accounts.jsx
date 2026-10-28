@@ -414,7 +414,7 @@ function AccountFormDialog({ open, onClose, onSubmit, initial, accounts = [] }) 
     const paymentAccounts = accounts.filter((a) => a.id !== initial?.id && a.type !== "credit_card" && a.type !== "investment");
     // Igual que en Investments.jsx: si la cuenta ya usa una divisa desactivada en
     // Configuración, la mostramos como opción para no perderla al editar y guardar.
-    const currencyOptions = activeCurrencies.includes(form.currency) ? activeCurrencies : [form.currency, ...activeCurrencies];
+    const currencyOptions = !form.currency || activeCurrencies.includes(form.currency) ? activeCurrencies : [form.currency, ...activeCurrencies];
 
     const submit = (e) => {
         e.preventDefault();

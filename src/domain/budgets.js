@@ -20,33 +20,56 @@ export function splitBudgetsByType(budgets = [], categories = []) {
     };
 }
 
-export function getMatchingCategoryIds(budget, categories = []) {
+// Subcategorías que cubre el presupuesto de una categoría padre. Si una subcategoría tiene
+// presupuesto propio ese mes, queda afuera del padre (funciona como "override") para no
+// contar sus gastos dos veces. `budgets` son los demás presupuestos (se filtran por mes acá).
+function getCoveredChildCategories(budget, categories = [], budgets = []) {
+    const ownBudgetCategoryIds = new Set(
+        budgets
+            .filter((other) => other.id !== budget.id && other.month === budget.month && other.category_id)
+            .map((other) => other.category_id)
+    );
+    return categories.filter((category) =>
+        category.parent_category === budget.category_id && !ownBudgetCategoryIds.has(category.id)
+    );
+}
+
+export function getMatchingCategoryIds(budget, categories = [], budgets = []) {
     if (!budget?.category_id) return null;
     const ids = new Set([budget.category_id]);
-    categories.forEach((category) => {
-        if (category.parent_category === budget.category_id) ids.add(category.id);
-    });
+    getCoveredChildCategories(budget, categories, budgets).forEach((category) => ids.add(category.id));
     return ids;
 }
 
-export function getChildCategoryCount(budget, categories = []) {
+export function getChildCategoryCount(budget, categories = [], budgets = []) {
     if (!budget?.category_id) return 0;
-    return categories.filter((category) => category.parent_category === budget.category_id).length;
+    return getCoveredChildCategories(budget, categories, budgets).length;
 }
 
-export function transactionMatchesBudgetCategory(tx, budget, categories = []) {
-    const matchingIds = getMatchingCategoryIds(budget, categories);
+// Ya existe otro presupuesto para esta misma categoría en este mes (duplicado exacto).
+export function findDuplicateBudget(candidate, budgets = []) {
+    if (!candidate?.category_id) return null;
+    return budgets.find((other) =>
+        other.id !== candidate.id &&
+        other.month === candidate.month &&
+        other.category_id === candidate.category_id
+    ) || null;
+}
+
+export function transactionMatchesBudgetCategory(tx, budget, categories = [], budgets = []) {
+    const matchingIds = getMatchingCategoryIds(budget, categories, budgets);
     if (matchingIds && tx.category_id && matchingIds.has(tx.category_id)) return true;
     if (!matchingIds && budget.category_name && tx.category_name === budget.category_name) return true;
     return false;
 }
 
-export function transactionMatchesBudget(tx, budget, { categories = [], from, to, context = {}, today, includeFuture = false } = {}) {
+// `budgets`: todos los presupuestos del mes, para aplicar el override padre/subcategoría.
+export function transactionMatchesBudget(tx, budget, { categories = [], budgets = [], from, to, context = {}, today, includeFuture = false } = {}) {
     const budgetType = getBudgetType(budget, categories);
     if (budgetType === "income" ? !isRegularIncome(tx) : !isRegularExpense(tx)) return false;
     if (tx.status === "projected") return false;
     if (!transactionMatchesReportPeriod(tx, { from, to, context, today, includeFuture })) return false;
-    return transactionMatchesBudgetCategory(tx, budget, categories);
+    return transactionMatchesBudgetCategory(tx, budget, categories, budgets);
 }
 
 export function getBudgetProgress(budget, transactions = [], options = {}) {
@@ -88,7 +111,7 @@ export function getMonthlyBudgetCompliance(allBudgets = [], transactions = [], {
         const monthBudgets = getMonthBudgets(allBudgets, monthKey);
         const { expenseBudgets } = splitBudgetsByType(monthBudgets, categories);
         const budgeted = sumConvertedBudgetAmounts(expenseBudgets, convert);
-        const spent = sumConvertedBudgetProgress(expenseBudgets, transactions, { categories, from, to, context, convert, includeFuture: true });
+        const spent = sumConvertedBudgetProgress(expenseBudgets, transactions, { categories, budgets: monthBudgets, from, to, context, convert, includeFuture: true });
         return {
             monthKey,
             budgeted,
@@ -111,9 +134,10 @@ export function getCategoryOverBudgetFrequency(allBudgets = [], transactions = [
     const stats = new Map();
     months.forEach((monthKey) => {
         const { from, to } = monthRange(monthKey);
-        const { expenseBudgets } = splitBudgetsByType(getMonthBudgets(allBudgets, monthKey), categories);
+        const monthBudgets = getMonthBudgets(allBudgets, monthKey);
+        const { expenseBudgets } = splitBudgetsByType(monthBudgets, categories);
         expenseBudgets.forEach((budget) => {
-            const spent = getBudgetProgress(budget, transactions, { categories, from, to, context, convert, includeFuture: true });
+            const spent = getBudgetProgress(budget, transactions, { categories, budgets: monthBudgets, from, to, context, convert, includeFuture: true });
             const key = budget.category_name || "Sin categoría";
             const entry = stats.get(key) || { category_name: key, monthsWithBudget: 0, overMonths: 0 };
             entry.monthsWithBudget += 1;

@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import PageHeader from "@/components/shared/PageHeader";
 import { formatCurrencyCode, formatDate } from "@/lib/formatters";
 import {
+    findDuplicateBudget,
     getBudgetProgress,
     getChildCategoryCount,
     getMonthBudgets,
@@ -63,6 +64,7 @@ export default function Budgets() {
     const budgets = getMonthBudgets(allBudgets, monthKey);
     const budgetProgressOptions = {
         categories,
+        budgets,
         from: monthStart,
         to: monthEnd,
         includeFuture: true,
@@ -90,11 +92,17 @@ export default function Budgets() {
 
     const copyFromLastMonth = async () => {
         if (prevBudgets.length === 0) { toast.error("No hay presupuestos del mes anterior"); return; }
-        for (const b of prevBudgets) {
+        // No duplicar categorías que ya tienen presupuesto este mes (ej. si se copia dos veces).
+        const budgetKey = (b) => b.category_id || `name:${b.category_name}`;
+        const existingKeys = new Set(budgets.map(budgetKey));
+        const toCopy = prevBudgets.filter((b) => !existingKeys.has(budgetKey(b)));
+        if (toCopy.length === 0) { toast.info("Todas las categorías ya tienen presupuesto este mes"); return; }
+        for (const b of toCopy) {
             await base44.entities.Budget.create({ ...b, id: undefined, month: monthKey, spent: 0 });
         }
         queryClient.invalidateQueries({ queryKey: ["budgets"] });
-        toast.success(`${prevBudgets.length} presupuestos copiados`);
+        const skipped = prevBudgets.length - toCopy.length;
+        toast.success(`${toCopy.length} presupuestos copiados${skipped > 0 ? ` (${skipped} ya existían)` : ""}`);
     };
 
     const { expenseBudgets: expBudgets, incomeBudgets: incBudgets } = splitBudgetsByType(budgets, categories);
@@ -204,7 +212,7 @@ export default function Budgets() {
                                                         <div className="min-w-0">
                                                             <p className="font-semibold truncate">{b.category_name}</p>
                                                             {b.category_id && (() => {
-                                                                const childCount = getChildCategoryCount(b, categories);
+                                                                const childCount = getChildCategoryCount(b, categories, budgets);
                                                                 return childCount > 0
                                                                     ? <p className="text-xs text-muted-foreground">incluye {childCount} subcategoría{childCount > 1 ? "s" : ""}</p>
                                                                     : null;
@@ -320,13 +328,14 @@ export default function Budgets() {
                 initial={editing}
                 categories={categories}
                 monthKey={monthKey}
+                monthBudgets={budgets}
                 onSubmit={(data) => editing ? updateMut.mutate({ id: editing.id, data }) : createMut.mutate({ ...data, month: monthKey })}
             />
         </div>
     );
 }
 
-function BudgetFormDialog({ open, onClose, onSubmit, initial, categories, monthKey }) {
+function BudgetFormDialog({ open, onClose, onSubmit, initial, categories, monthKey, monthBudgets = [] }) {
     const { activeCurrencies } = useCurrency();
     const defaultCurrency = activeCurrencies[0] || "ARS";
     const [form, setForm] = useState({ category_name: "", amount: "", period: "monthly", spent: 0, currency: defaultCurrency });
@@ -337,7 +346,7 @@ function BudgetFormDialog({ open, onClose, onSubmit, initial, categories, monthK
     const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
     // Igual que en Investments.jsx/Accounts.jsx: no perder una divisa desactivada en
     // Configuración que ya estaba usando este presupuesto.
-    const currencyOptions = activeCurrencies.includes(form.currency) ? activeCurrencies : [form.currency, ...activeCurrencies];
+    const currencyOptions = !form.currency || activeCurrencies.includes(form.currency) ? activeCurrencies : [form.currency, ...activeCurrencies];
 
     const handleCat = (id) => {
         const cat = categories.find((c) => c.id === id);
@@ -354,12 +363,17 @@ function BudgetFormDialog({ open, onClose, onSubmit, initial, categories, monthK
                 <form onSubmit={(e) => {
                         e.preventDefault();
                         if (!form.category_id && !form.category_name.trim()) return;
+                        const duplicate = findDuplicateBudget({ ...form, id: initial?.id, month: initial?.month || monthKey }, monthBudgets);
+                        if (duplicate) {
+                            toast.error(`Ya hay un presupuesto para ${duplicate.category_name} este mes. Editá ese en vez de crear otro.`);
+                            return;
+                        }
                         onSubmit({ ...form, amount: parseFloat(form.amount) || 0 });
                     }} className="space-y-4">
                     <div>
                         <Label>Categoría <span className="text-destructive">*</span></Label>
                         <p className="text-xs text-muted-foreground mb-1.5">
-                            Si elegís una categoría padre, se suman los gastos de todas sus subcategorías.
+                            Si elegís una categoría padre, se suman los gastos de sus subcategorías, salvo las que tengan presupuesto propio este mes.
                         </p>
                         {categories.length === 0 ? (
                             <p className="text-sm text-muted-foreground border rounded-md px-3 py-2">

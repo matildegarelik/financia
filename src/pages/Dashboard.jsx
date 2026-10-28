@@ -123,6 +123,7 @@ export default function Dashboard() {
     const getBudgetSpent = (b) => {
         return getBudgetProgress(b, transactions, {
             categories,
+            budgets: getMonthBudgets(budgets, currentMonth),
             from: monthStart,
             to: monthEnd,
             context: reportingContext,

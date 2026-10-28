@@ -28,13 +28,17 @@ _Se va actualizando a medida que avanzamos. Última actualización: 2026-10-23._
 
 ### Resueltos recientemente (2026-10-25)
 - [x] **Bug de divisa al editar Inversiones/Cuentas/Presupuestos/Suscripciones/Proyectado.** Caso reportado: al editar una inversión de Binance en EUSDT, la divisa quedó guardada como ARS. Causa confirmada: el `<Select>` de moneda en esos 5 formularios estaba poblado **solo** con `activeCurrencies` (las monedas activas en Configuración, persistidas en `localStorage` — ver hallazgo 1.5). `Settings.jsx::removeCurrency` permite desactivar cualquier moneda sin chequear si algo la usa, y además `activeCurrencies` vive solo en el navegador: cambiar de dispositivo, limpiar el storage, o simplemente desactivarla en Configuración hace que esa divisa desaparezca de la lista de opciones, y al reabrir y guardar el registro se pierde silenciosamente. **Arreglado** en `Investments.jsx`, `Accounts.jsx`, `Budgets.jsx`, `Suscripciones.jsx` y `TransactionFormProjected.jsx`: cada formulario ahora incluye la divisa actual del registro en las opciones del `<Select>` aunque no esté en `activeCurrencies`, así nunca se pierde al editar y guardar.
-- [ ] **Dato ya corrompido a recuperar manualmente:** la inversión de Binance específica que se reportó quedó guardada como ARS antes de este fix — hay que volver a agregar "EUSDT" como divisa custom en Configuración y re-seleccionarla en esa inversión (los montos numéricos no cambiaron, solo la etiqueta de moneda estaba mal). El código nuevo previene que vuelva a pasar, pero no puede adivinar retroactivamente cuál era la divisa correcta de un dato ya sobrescrito.
-- [ ] **A decidir — gráficos de Analytics poco útiles** (ver sección 13 para las alternativas propuestas, todavía sin implementar a propósito — la usuaria quiere pensarlas antes).
+- [x] **Dato ya corrompido a recuperar manualmente** (corregido a USDT en la base, 2026-10-28): la inversión de Binance específica que se reportó quedó guardada como ARS antes de este fix — hay que volver a agregar "EUSDT" como divisa custom en Configuración y re-seleccionarla en esa inversión (los montos numéricos no cambiaron, solo la etiqueta de moneda estaba mal). El código nuevo previene que vuelva a pasar, pero no puede adivinar retroactivamente cuál era la divisa correcta de un dato ya sobrescrito.
+- [x] **Gráficos de Analytics poco útiles** — implementadas A, B, C y E (2026-10-28), ver sección 13.
 - [x] **3.5 — Transferencias: ya no se elige modo ni se ingresa tasa a mano.** Ahora siempre se ingresa monto origen + monto destino, y la tasa efectiva y la diferencia contra la tasa de referencia se calculan solas (ver sección 3.5 actualizada).
 - [x] **UI de Tarjetas de crédito rediseñada** (sección 8) — ver detalle ahí.
 - [x] **Desplegable de categorías confuso en páginas nuevas (y duplicado en código en 3 formularios viejos).** `Suscripciones.jsx` mostraba las categorías en una lista plana sin jerarquía (al revés de Transacciones, que marca categoría padre vs. subcategoría con "↳"). Al revisar, encontré que la lógica de armar esa jerarquía estaba **copiada 3 veces** (`TransactionForm.jsx`, `TransactionFormProjected.jsx`, `Budgets.jsx`), cada copia ligeramente distinta. Se extrajo a `domain/categories.js::buildCategoryTree` (única fuente de verdad) y se usa en los 4 lugares, incluido el que faltaba en Suscripciones.
 - [x] **Bug en `Projected.jsx` → vista "Resumen" → columna "Del año".** Para un año futuro, esa columna mostraba "—" (nada) porque solo sumaba transacciones proyectadas sueltas, nunca los presupuestos — mientras que la columna "Ahorro total" (al lado) sí incluye presupuestos (usa `computeMonth` acumulado mes a mes) y mostraba un número. Quedaba inconsistente: una columna vacía al lado de otra con datos, para el mismo año. **Arreglado:** "Del año" ahora usa el mismo cálculo mensual (`computeMonth`, que ya incluye presupuestos) sumado a lo largo de los 12 meses, igual que ya hacía "Ahorro total". Para años futuros se muestra en color neutro con "≈" (no verde/rojo, porque no es confirmado) — mismo criterio visual que ya usaba el año en curso.
 - [x] **Nueva página Wishlist** (sección 12) — lista simple de cosas para comprar con precio y categoría de texto libre, sin relación con el resto de la app. **Falta aplicar la migración SQL manualmente** (ver 12.1).
+
+### Resueltos (2026-10-28)
+- [x] Crash al editar una inversión con divisa vacía/null (`Select.Item` con value `""`), introducido por el fix de divisas del 25/10. Corregido en los 5 formularios. La inversión de Binance se corrigió a USDT en la base.
+- [x] Sección 11 — override padre/subcategoría en presupuestos, bloqueo de duplicados, "Copiar del mes anterior" sin duplicar.
 
 ### Bugs y limpieza (sección de "empecemos por los bugs")
 - [x] 2.1 — Presupuestos mezclaban divisas sin convertir antes de sumar (`domain/budgets.js`)
@@ -296,6 +300,13 @@ Esto es la causa de fondo de la sensación de que "hay cosas que no cuadran": el
   - Requiere un cambio puntual (no grande) en `domain/budgets.js::getMatchingCategoryIds`: cuando el budget es de una categoría padre, excluir de la cobertura a las hijas que tengan su propio budget ese mes. Como `Projected.jsx` ya reutiliza esta misma función (gracias a la unificación de la sección 2.2), el arreglo se propaga solo a Proyectado sin tocarlo de nuevo — es la razón por la que vale la pena unificar antes de "parchar" cada pantalla por separado.
   - Se complementa con una validación más simple en la UI: solo bloquear el duplicado exacto (mismo category_id + mismo mes), que sí es un error sin ningún caso de uso válido.
 
+**✅ IMPLEMENTADO (2026-10-28) — Opción B:**
+- `domain/budgets.js::getMatchingCategoryIds` recibe los presupuestos del mes y excluye del padre las subcategorías con presupuesto propio. Se pasa vía la opción `budgets` en `getBudgetProgress`/`transactionMatchesBudget` (Budgets.jsx, Dashboard.jsx, `getMonthlyBudgetCompliance`, `getCategoryOverBudgetFrequency`). La etiqueta "incluye N subcategorías" también descuenta las que tienen presupuesto propio.
+- Proyectado no necesitó cambios: usa la unión de categorías cubiertas, que no cambia con el override.
+- Formulario de presupuesto: bloquea crear/editar a una categoría que ya tiene presupuesto ese mes (`findDuplicateBudget`).
+- "Copiar del mes anterior" saltea categorías que ya tienen presupuesto en el mes destino (antes, tocarlo dos veces duplicaba todo).
+- Duplicados que ya existan en la base de antes de este cambio no se borran solos: hay que eliminarlos a mano desde Presupuestos.
+
 **Sobre la relación con Proyectado:** la usaste bien al intuir que debería ser "estimo, y después voy siguiendo mes a mes" — y así está pensado hoy (`computeMonth` mezcla presupuesto como base + proyecciones sueltas para lo no presupuestado, y compara contra lo real). Lo que no cuadra no es el concepto, sino que el "no cuadra" que notás probablemente viene de este mismo problema de doble conteo (sección 11) y de la falta de aviso cuando una proyección individual ya quedó cubierta por un presupuesto (2.3, ya con badge visual ahora). Una vez resuelto el override de la Opción B, valdría la pena que me confirmes si sigue sintiéndose raro con un caso concreto tuyo.
 
 ---
@@ -312,7 +323,24 @@ Pedido nuevo (2026-10-25): una pantalla sin relación con el resto de la app —
 
 - **Aplicar la migración SQL manualmente**: `supabase/migrations/20261025_012_wishlist.sql` crea la tabla `wishlist_items`. Mismo procedimiento que las migraciones anteriores (SQL Editor de Supabase). **Importante:** antes de correrla, confirmá en el SQL Editor que no tira ningún error (como pasó con la de Suscripciones, que quedó sin aplicar la primera vez sin que quedara claro por qué) — si tira error, pegame el mensaje exacto.
 
-## 13. Analytics — gráficos poco útiles, propuestas a decidir (no implementado a propósito)
+## 13. Analytics — gráficos poco útiles
+
+**✅ IMPLEMENTADO (2026-10-28) — A + B + C + E (D descartada por la usuaria):**
+- Cálculos nuevos en `domain/analytics.js` (`getMonthlyNetSavings`, `getMonthOverMonthComparison`, `getSpendingPace`); `Analytics.jsx` solo los muestra.
+- **A:** "Ahorro acumulado" reemplazado por barras de ahorro neto por mes (verde/rojo). Con un solo mes elegido muestra además los 5 anteriores, atenuados, como referencia.
+- **B:** el gráfico diario ya no existe. "Ingresos vs Gastos" agrupa siempre por mes y solo aparece cuando el rango abarca varios meses. Las tarjetas de promedio pasan a "promedio mensual" (o "del mes" con un solo mes).
+- **C:** "Ritmo de gasto" (solo con un mes): acumulado real de gasto en categorías con presupuesto vs. el presupuesto total repartido parejo. Suma transacciones, no presupuestos, así que no hay doble conteo. Independiente del filtro de categorías, igual que el cumplimiento de presupuesto.
+- **E:** "Gasto vs. mes anterior" (solo con un mes): total, % de cambio y las 5 categorías que más cambiaron. Si el mes está en curso, se compara contra el mismo tramo de días del mes anterior. Respeta el filtro de categorías. El top de categorías del mes ya existía y se mantiene.
+
+**🔁 REDISEÑADO (2026-10-28, segunda vuelta)** — feedback de la usuaria: el filtro de arriba ya no tenía sentido (cada tarjeta lo respetaba distinto) y el cumplimiento de presupuesto era confuso ("0k" en el eje; "% cumplimiento" donde menos era mejor).
+- **Selector único arriba con dos modos:** *Mes* (navegador ‹ mes ›) y *Período* (3/6/12 meses, este año, año pasado, personalizado por mes). Todo en pantalla obedece a ese selector, sin excepciones.
+- **Se eliminó el filtro global de categorías.** Su uso pasó a la tarjeta *Evolución por categoría* (modo Período): una línea por mes por cada categoría elegida, incluyendo subcategorías. Por defecto muestra las 3 categorías padre con más gasto.
+- **Mes:** resumen del mes, gasto vs. mes anterior, ritmo de gasto, top categorías, medios de pago, comercios.
+- **Período:** promedios mensuales, ingresos vs gastos por mes, ahorro neto por mes, cumplimiento de presupuesto, evolución por categoría, top categorías, medios de pago, comercios.
+- **Cumplimiento rehecho:** barras de "% del presupuesto usado" con línea fija en 100%; verde si quedó por debajo, rojo si se pasó; el mes en curso atenuado. En vez del promedio: "Te mantuviste dentro del presupuesto en X de Y meses cerrados". Sin pestañas 6/12 propias: usa los meses del período.
+- **Ejes compactos** en todos los gráficos (`formatCompactNumber`: 350, 1,2k, 1,5M).
+
+### Propuesta original
 
 Pedido de la usuaria (2026-10-25), todavía sin implementar porque quiere pensarlo antes de elegir:
 
@@ -349,9 +377,9 @@ Pedido de la usuaria (2026-10-25), todavía sin implementar porque quiere pensar
 9. ✅ **Hecho** — Rediseño de UI de tarjetas de crédito para mobile (sección 8): filas colapsadas por defecto, un solo panel de detalle, textos de cierre/vencimiento reales, targets táctiles más grandes, mensaje explícito en el caso de divisas distintas.
 10. ✅ **Hecho** — Dedupe de jerarquía de categorías en 4 formularios (incluido el desplegable confuso de Suscripciones) → `domain/categories.js::buildCategoryTree`.
 11. ✅ **Hecho** — Fix de la columna "Del año" en Proyectado → Resumen (no incluía presupuestos para años futuros).
-12. ✅ **Hecho** — Wishlist (sección 12): nueva pantalla, sin relación con el resto de la app. **Falta aplicar la migración SQL manualmente** (ver 12.1).
-13. ⬜ **A decidir, propuestas ya escritas (sección 13)** — Gráficos de Analytics: "Ingresos vs Gastos por día" pierde escala por los picos de cobro/pago de tarjeta, y "Ahorro acumulado" no es lo que la usuaria quiere ver (prefiere neto por mes). Cinco alternativas (A-E) documentadas con mi recomendación, a la espera de que elija.
+12. ✅ **Hecho** — Wishlist (sección 12): nueva pantalla, sin relación con el resto de la app. Migración aplicada (2026-10-28).
+13. ✅ **Hecho (2026-10-28)** — Gráficos de Analytics (sección 13): la usuaria eligió A + B + C + E (D descartada).
 14. ⬜ **Siguiente candidato** — Tipo de cambio histórico (1.1, 1.2): el más grande y estructural — requiere guardar snapshot de tasa por transacción. No bloqueante para el uso diario, pero es la raíz de por qué los reportes históricos "se mueven solos".
-15. ⬜ **A decidir** — Repensar el modelo de Presupuestos vs. Proyectado (sección 11) — permitir duplicados hoy es la causa de fondo de varias rarezas que notó la usuaria. Es un cambio al motor de matching compartido con Proyectado, por eso lo dejo documentado para decidir el enfoque antes de tocarlo.
+15. ✅ **Hecho (2026-10-28)** — Presupuestos padre/subcategoría con semántica de override (sección 11, Opción B) + bloqueo de duplicado exacto + "Copiar del mes anterior" ya no duplica.
 
 Ver el checklist detallado al principio del documento para el estado ítem por ítem.

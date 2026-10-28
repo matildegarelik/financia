@@ -422,14 +422,15 @@ function InvestmentFormDialog({ open, onClose, onSubmit, initial, accounts = [] 
     const blank = { name: "", type: "stocks", amount_invested: "", current_value: "", currency: defaultCurrency, platform: "", purchase_date: "", notes: "", account_id: "" };
     const [form, setForm] = useState(blank);
     React.useEffect(() => {
-        if (initial) setForm({ ...blank, ...initial, amount_invested: String(initial.amount_invested || ""), current_value: String(initial.current_value || ""), account_id: initial.account_id || "" });
+        if (initial) setForm({ ...blank, ...initial, currency: initial.currency || defaultCurrency, amount_invested: String(initial.amount_invested || ""), current_value: String(initial.current_value || ""), account_id: initial.account_id || "" });
         else setForm({ ...blank, currency: defaultCurrency });
     }, [initial, open]);
     const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
     // Si la inversión ya usa una divisa que se desactivó en Configuración (ej. cambiaste
     // de dispositivo y se perdió del localStorage), igual la mostramos como opción para
     // no perderla silenciosamente al editar y guardar.
-    const currencyOptions = activeCurrencies.includes(form.currency) ? activeCurrencies : [form.currency, ...activeCurrencies];
+    // Si la divisa está vacía o es null no se agrega: Radix no acepta un SelectItem con value "".
+    const currencyOptions = !form.currency || activeCurrencies.includes(form.currency) ? activeCurrencies : [form.currency, ...activeCurrencies];
 
     return (
         <Dialog open={open} onOpenChange={onClose}>

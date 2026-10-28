@@ -169,7 +169,7 @@ function SubscriptionForm({ open, initial, accounts, categories, activeCurrencie
     const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
     // Igual que en Investments.jsx/Accounts.jsx: no perder una divisa desactivada en
     // Configuración que ya estaba usando esta suscripción.
-    const currencyOptions = activeCurrencies.includes(form.currency) ? activeCurrencies : [form.currency, ...activeCurrencies];
+    const currencyOptions = !form.currency || activeCurrencies.includes(form.currency) ? activeCurrencies : [form.currency, ...activeCurrencies];
 
     const handleSubmit = (e) => {
         e.preventDefault();
