@@ -26,6 +26,7 @@ import {
     getStatementMonthKey,
     transactionMatchesStatement,
 } from "@/domain/creditCards";
+import { getSubscriptionOccurrencesInRange } from "@/domain/subscriptions";
 
 function monthIndex(date) {
     if (!date) return null;
@@ -62,6 +63,10 @@ export default function CreditCards() {
     const { data: statements = [] } = useQuery({
         queryKey: ["credit_card_statements"],
         queryFn: () => base44.entities.CreditCardStatement.list("-period_end", 1000),
+    });
+    const { data: subscriptions = [] } = useQuery({
+        queryKey: ["subscriptions"],
+        queryFn: () => base44.entities.Subscription.list("name"),
     });
 
     const cardAccounts = useMemo(
@@ -229,6 +234,7 @@ export default function CreditCards() {
                             transactions={transactions}
                             statements={statements}
                             accounts={accounts}
+                            subscriptions={subscriptions}
                             onEdit={(statement) => setEditing({ card: selectedCard, statement })}
                             onPay={(statement, paymentAccount) => payStatementMut.mutate({ statement, paymentAccount })}
                             paying={payStatementMut.isPending}
@@ -252,7 +258,7 @@ export default function CreditCards() {
     );
 }
 
-function CreditCardPanel({ card, transactions, statements, accounts, onEdit, onPay, paying, onUndoPay, undoing }) {
+function CreditCardPanel({ card, transactions, statements, accounts, subscriptions, onEdit, onPay, paying, onUndoPay, undoing }) {
     const [showPrevious, setShowPrevious] = useState(false);
     const statementsByMonth = useMemo(
         () => buildStatementsByMonth(statements, card.id),
@@ -295,8 +301,26 @@ function CreditCardPanel({ card, transactions, statements, accounts, onEdit, onP
     const previousStatements = monthlyStatements
         .filter((statement) => statement.close_date < TODAY && !visibleStatementKeys.has(getStatementMonthKey(statement)))
         .sort((a, b) => b.close_date.localeCompare(a.close_date));
-    const effective = computeAccountBalance(card, transactions);
-    const debt = Math.max(0, -effective);
+
+    // Cobros de suscripciones activas de esta tarjeta que todavía no se materializaron y
+    // van a caer dentro del período por cerrar — se muestran proyectados, sin crear
+    // transacciones (ver getSubscriptionOccurrencesInRange).
+    const projectedSubscriptions = useMemo(() => {
+        if (!nextCloseStatement) return [];
+        return (subscriptions || [])
+            .filter((sub) => sub.status === "active" && sub.account_id === card.id)
+            .flatMap((sub) =>
+                getSubscriptionOccurrencesInRange(sub, nextCloseStatement.period_start, nextCloseStatement.period_end, TODAY)
+                    .map((date) => ({
+                        id: `${sub.id}:${date}`,
+                        date,
+                        description: sub.name,
+                        amount: Number(sub.amount) || 0,
+                        currency: sub.currency || "ARS",
+                    }))
+            )
+            .sort((a, b) => a.date.localeCompare(b.date));
+    }, [subscriptions, nextCloseStatement, card.id]);
 
     return (
         <Card>
@@ -323,13 +347,6 @@ function CreditCardPanel({ card, transactions, statements, accounts, onEdit, onP
                 </div>
             </CardHeader>
             <CardContent className="space-y-4">
-                <div>
-                    <p className="text-xs text-muted-foreground">Deuda actual</p>
-                    <p className={cn("text-xl font-bold", debt > 0 ? "text-destructive" : "text-primary")}>
-                        {formatCurrencyCode(debt, card.currency || "ARS")}
-                    </p>
-                </div>
-
                 <div className="space-y-2">
                     {visibleStatements.length === 0 ? (
                         <div className="rounded-lg border border-border/60 p-4 text-center text-sm text-muted-foreground">
@@ -345,6 +362,7 @@ function CreditCardPanel({ card, transactions, statements, accounts, onEdit, onP
                             transactions={transactions}
                             card={card}
                             accounts={accounts}
+                            projectedSubscriptions={statement === nextCloseStatement ? projectedSubscriptions : []}
                             onEdit={() => onEdit(statement)}
                             onPay={onPay}
                             paying={paying}
@@ -390,9 +408,16 @@ function CreditCardPanel({ card, transactions, statements, accounts, onEdit, onP
     );
 }
 
-function StatementMonthRow({ label, statement, transactions, card, accounts, onEdit, onPay, paying, onUndoPay, undoing }) {
+function StatementMonthRow({ label, statement, transactions, card, accounts, projectedSubscriptions = [], onEdit, onPay, paying, onUndoPay, undoing }) {
+    const { convert } = useCurrency();
     const [expanded, setExpanded] = useState(false);
     const monthKey = getStatementMonthKey(statement);
+    const statementCurrency = statement.currency || "ARS";
+    const projectedTotal = projectedSubscriptions.reduce(
+        (sum, item) => sum + convert(item.amount, item.currency, statementCurrency),
+        0
+    );
+    const estimatedTotal = statement.total_amount + projectedTotal;
     const statementTransactions = useMemo(
         () => transactions
             .filter((tx) => transactionMatchesStatement(tx, statement))
@@ -419,7 +444,8 @@ function StatementMonthRow({ label, statement, transactions, card, accounts, onE
                         <p className="text-sm font-semibold">{monthKey}</p>
                     </div>
                     <p className="text-xs text-muted-foreground">
-                        {formatCurrencyCode(statement.total_amount, statement.currency || "ARS")}
+                        {formatCurrencyCode(projectedTotal > 0 ? estimatedTotal : statement.total_amount, statementCurrency)}
+                        {projectedTotal > 0 && <span className="text-muted-foreground/70"> estimado</span>}
                         {" · "}
                         <Badge variant={isPaid ? "secondary" : hasEnoughBalance ? "outline" : "destructive"} className="text-[10px] px-1.5 py-0 ml-0.5">
                             {statusLabel}
@@ -485,7 +511,7 @@ function StatementMonthRow({ label, statement, transactions, card, accounts, onE
                         </div>
                     </div>
 
-                    {statementTransactions.length > 0 ? (
+                    {statementTransactions.length > 0 || projectedSubscriptions.length > 0 ? (
                         <div className="space-y-1.5">
                             {statementTransactions.map((tx) => (
                                 <div key={tx.id} className="grid grid-cols-[1fr_auto] gap-3 text-xs">
@@ -501,6 +527,23 @@ function StatementMonthRow({ label, statement, transactions, card, accounts, onE
                                     <span className="font-medium">{formatCurrencyCode(tx.amount, tx.currency || statement.currency || "ARS")}</span>
                                 </div>
                             ))}
+                            {projectedSubscriptions.map((item) => (
+                                <div key={item.id} className="grid grid-cols-[1fr_auto] gap-3 text-xs">
+                                    <div className="min-w-0 text-muted-foreground/80">
+                                        <span>{formatDate(item.date)}</span>
+                                        <span> · </span>
+                                        <span>{item.description}</span>
+                                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 ml-1.5">Proyectado</Badge>
+                                    </div>
+                                    <span className="font-medium text-muted-foreground/80">{formatCurrencyCode(item.amount, item.currency)}</span>
+                                </div>
+                            ))}
+                            {projectedTotal > 0 && (
+                                <div className="grid grid-cols-[1fr_auto] gap-3 text-xs border-t border-border/60 pt-1.5 mt-0.5">
+                                    <span className="text-muted-foreground">Total estimado</span>
+                                    <span className="font-semibold">{formatCurrencyCode(estimatedTotal, statementCurrency)}</span>
+                                </div>
+                            )}
                         </div>
                     ) : (
                         <p className="text-xs text-muted-foreground">No hay consumos dentro de este periodo.</p>

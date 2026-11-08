@@ -179,7 +179,7 @@ function WishlistItemForm({ open, initial, activeCurrencies, existingCategories,
         e.preventDefault();
         onSubmit({
             ...form,
-            category: form.category.trim() || null,
+            category: (form.category || "").trim() || null,
             price: form.price !== "" ? parseFloat(form.price) || 0 : null,
         });
     };
